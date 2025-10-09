@@ -259,8 +259,8 @@ def main():
         updater.stop()
         updater.is_idle = False
 
-    signal.signal(signal.SIGINT, shutdown)
-    signal.signal(signal.SIGTERM, shutdown)
+    # signal.signal(signal.SIGINT, shutdown)
+    # signal.signal(signal.SIGTERM, shutdown)
 
     updater.idle()
 
