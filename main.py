@@ -1,11 +1,10 @@
 # main.py
 # SaylorWatchBot — мониторинг страницы с уведомлениями в Telegram
-# Совместим с python-telegram-bot==13.15
+# Совместим с python-telegram-bot==13.15 и работает на Render 24/7
 
 import os
 import json
 import time
-import signal
 import hashlib
 import logging
 from pathlib import Path
@@ -38,7 +37,7 @@ CHECK_INTERVAL_MIN = int(os.getenv("CHECK_INTERVAL_MIN", "15"))
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не найден в .env")
 if not CHAT_ID:
-    log.warning("X_CHAT_ID не задан: уведомления по расписанию не будут отправляться до его указания")
+    log.warning("X_CHAT_ID не задан — уведомления по расписанию не будут отправляться до его указания")
 
 # ---------- ГЛОБАЛЬНОЕ СОСТОЯНИЕ ----------
 state = {
@@ -82,7 +81,6 @@ def fetch_url(url: str) -> str:
     }
     r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
-    # подрезаем слишком тяжёлые страницы
     text = r.text
     if len(text) > 2_000_000:
         text = text[:2_000_000]
@@ -111,7 +109,6 @@ def check_once(context: CallbackContext = None, manual: bool = False):
         state["last_checked"] = now_iso()
 
         if state.get("last_digest") != dgst:
-            # Изменение! Обновляем и уведомляем
             prev = state.get("last_digest")
             state["last_digest"] = dgst
             state["last_changed"] = state["last_checked"]
@@ -126,7 +123,6 @@ def check_once(context: CallbackContext = None, manual: bool = False):
             send(msg)
             log.info("Изменение зафиксировано для %s", url)
         else:
-            # без изменений
             save_state()
             log.info("Без изменений (%s)", url)
             if manual:
@@ -135,7 +131,7 @@ def check_once(context: CallbackContext = None, manual: bool = False):
     except requests.HTTPError as e:
         log.warning("HTTP ошибка %s при обращении к %s", e, url)
         if manual:
-            send(f"HTTP ошибка при проверке: <code>{e}</code>\nURL: <code>{url}</code>")
+            send(f"HTTP ошибка: <code>{e}</code>\nURL: <code>{url}</code>")
     except Exception as e:
         log.warning("Ошибка проверки %s: %s", url, e)
         if manual:
@@ -146,17 +142,16 @@ def check_once(context: CallbackContext = None, manual: bool = False):
 # ---------- КОМАНДЫ БОТА ----------
 def cmd_start(update: Update, context: CallbackContext):
     update.message.reply_text(
-        "SaylorWatchBot запущен.\n"
-        "Команды: /id /status /force /seturl /setinterval /help"
+        "SaylorWatchBot запущен.\nКоманды: /id /status /force /seturl /setinterval /help"
     )
 
 def cmd_help(update: Update, context: CallbackContext):
     update.message.reply_text(
         "/id — показать ваш chat_id\n"
-        "/status — показать текущие настройки и время последней проверки\n"
-        "/force — немедленная проверка сейчас\n"
-        "/seturl <url> — изменить мониторимый URL\n"
-        "/setinterval <минуты> — изменить интервал проверок\n"
+        "/status — текущее состояние\n"
+        "/force — немедленная проверка\n"
+        "/seturl <url> — изменить URL\n"
+        "/setinterval <минуты> — изменить интервал\n"
         "/help — помощь"
     )
 
@@ -183,7 +178,6 @@ def cmd_seturl(update: Update, context: CallbackContext):
         return
     url = context.args[0].strip()
     state["url"] = url
-    # сбрасываем digest, чтобы первое изменение зафиксировалось корректно
     state["last_digest"] = None
     save_state()
     update.message.reply_text(f"URL обновлён: {url}\nПровожу проверку…")
@@ -196,13 +190,12 @@ def cmd_setinterval(update: Update, context: CallbackContext):
     try:
         m = max(1, int(context.args[0]))
     except ValueError:
-        update.message.reply_text("Интервал должен быть числом минут (целое число ≥1).")
+        update.message.reply_text("Интервал должен быть числом (≥1).")
         return
     state["interval_min"] = m
     save_state()
-    # перенастроим планировщик
     reschedule(m)
-    update.message.reply_text(f"Интервал проверок обновлён: каждые {m} мин.")
+    update.message.reply_text(f"Интервал проверок: каждые {m} мин.")
 
 # ---------- ПЛАНИРОВЩИК ----------
 scheduler = BackgroundScheduler()
@@ -231,37 +224,22 @@ def main():
     dp.add_handler(CommandHandler("seturl", cmd_seturl))
     dp.add_handler(CommandHandler("setinterval", cmd_setinterval))
 
-    # Старт бота
     updater.start_polling()
     log.info("SaylorWatchBot: бот запущен")
 
-    # Первичная проверка и планировщик
     if state["url"]:
         check_once(manual=False)
     if state["interval_min"] > 0:
         reschedule(state["interval_min"])
         scheduler.start()
 
-    # Пробуем отправить тест
     if CHAT_ID:
         try:
             Bot(BOT_TOKEN).send_message(chat_id=CHAT_ID, text="SaylorWatchBot запущен ✅")
         except Exception as e:
             log.info("Не удалось отправить тест: %s", e)
 
-    # Корректное завершение по сигналам
-    def shutdown(*_):
-        log.info("Остановка…")
-        try:
-            scheduler.shutdown(wait=False)
-        except Exception:
-            pass
-        updater.stop()
-        updater.is_idle = False
-
-    # signal.signal(signal.SIGINT, shutdown)
-    # signal.signal(signal.SIGTERM, shutdown)
-
+    # Бесконечное ожидание (заменяет сигнал на Render)
     updater.idle()
 
 if __name__ == "__main__":
