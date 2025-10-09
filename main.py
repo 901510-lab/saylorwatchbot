@@ -228,8 +228,8 @@ def main():
     dp.add_handler(CommandHandler("id", cmd_id))
     dp.add_handler(CommandHandler("status", cmd_status))
     dp.add_handler(CommandHandler("force", cmd_force))
-    dp.add_handler(CommandHandler("seturl", cmd_seturl, pass_args=True))
-    dp.add_handler(CommandHandler("setinterval", cmd_setinterval, pass_args=True))
+    dp.add_handler(CommandHandler("seturl", cmd_seturl))
+    dp.add_handler(CommandHandler("setinterval", cmd_setinterval))
 
     # Старт бота
     updater.start_polling()
