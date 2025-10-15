@@ -233,11 +233,11 @@ def main():
         reschedule(state["interval_min"])
         scheduler.start()
 
-    if CHAT_ID:
-        try:
-            Bot(BOT_TOKEN).send_message(chat_id=CHAT_ID, text="SaylorWatchBot запущен ✅")
-        except Exception as e:
-            log.info("Не удалось отправить тест: %s", e)
+   # if CHAT_ID:
+   #     try:
+   #         Bot(BOT_TOKEN).send_message(chat_id=CHAT_ID, text="SaylorWatchBot запущен ✅")
+   #     except Exception as e:
+   #         log.info("Не удалось отправить тест: %s", e)
 
     # Бесконечное ожидание (заменяет сигнал на Render)
     updater.idle()
