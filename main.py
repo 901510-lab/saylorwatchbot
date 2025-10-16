@@ -27,7 +27,8 @@ from datetime import datetime, timezone
 
 import requests
 from dotenv import load_dotenv
-from telegram import Bot, Update, ParseMode
+from telegram import Bot, Update
+from telegram.constants import ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
