@@ -12,7 +12,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # === Инициализация ===
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-X_CHAT_ID = os.getenv("X_CHAT_ID")
+X_CHAT_ID = os.getenv("X_CHAT_ID")  # твой админ Chat ID
 PORT = int(os.environ.get("PORT", 10000))
 
 logging.basicConfig(
@@ -20,6 +20,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+start_time = datetime.datetime.now()
 
 def write_log(msg):
     print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
@@ -30,35 +31,82 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет! Бот активен и работает 24/7 🚀")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Бот онлайн и готов к работе.")
+    uptime = datetime.datetime.now() - start_time
+    await update.message.reply_text(f"✅ Бот онлайн\n⏱ Аптайм: {uptime}")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "📖 *Команды:*\n"
+        "/start — проверить статус бота\n"
+        "/status — аптайм и состояние\n"
+        "/uptime — время работы\n"
+        "/info — информация о системе\n"
+        "/clear — очистить все сообщения\n"
+        "/restart — перезапуск бота (Render)\n"
+    )
+    await update.message.reply_text(help_text, parse_mode="Markdown")
+
+async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uptime = datetime.datetime.now() - start_time
+    await update.message.reply_text(f"⏱ Аптайм: {uptime}")
+
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != str(X_CHAT_ID):
+        await update.message.reply_text("⛔ Доступ запрещён.")
+        return
+    commit = os.getenv("RENDER_GIT_COMMIT", "N/A")
+    instance = os.getenv("RENDER_INSTANCE_ID", "N/A")
+    uptime = datetime.datetime.now() - start_time
+    msg = (
+        f"🧠 *Информация о боте:*\n"
+        f"Commit: `{commit}`\n"
+        f"Instance: `{instance}`\n"
+        f"Uptime: {uptime}\n"
+        f"Server Time: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != str(X_CHAT_ID):
+        await update.message.reply_text("⛔ Доступ запрещён.")
+        return
+    chat_id = update.message.chat_id
+    await update.message.reply_text("🧹 Очистка сообщений...")
+    async for msg in context.bot.get_chat(chat_id).iter_history():
+        try:
+            await context.bot.delete_message(chat_id, msg.message_id)
+        except Exception:
+            pass
+    await context.bot.send_message(chat_id, "✅ Сообщения очищены")
+
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != str(X_CHAT_ID):
+        await update.message.reply_text("⛔ Доступ запрещён.")
+        return
+    await update.message.reply_text("🔄 Перезапуск Render-инстанса...")
+    os._exit(0)
 
 # === Очистка старых апдейтов ===
 async def clear_pending_updates(token):
-    try:
-        bot = Bot(token)
-        updates = await bot.get_updates()
-        if updates:
-            await bot.delete_webhook(drop_pending_updates=True)
-            write_log(f"🧹 Очередь сообщений очищена ({len(updates)})")
-        else:
-            write_log("🧹 Очередь сообщений пуста")
-    except Exception as e:
-        write_log(f"⚠️ Ошибка очистки апдейтов: {e}")
+    bot = Bot(token)
+    updates = await bot.get_updates()
+    if updates:
+        await bot.delete_webhook(drop_pending_updates=True)
+        write_log(f"🧹 Очередь очищена ({len(updates)})")
+    else:
+        write_log("🧹 Очередь пуста")
 
-# === Уведомление о запуске ===
+# === Уведомления ===
 async def notify_start(token, chat_id):
     try:
         bot = Bot(token)
-        await asyncio.sleep(3)
         await bot.send_message(
             chat_id=chat_id,
-            text=f"✅ Бот запущен и готов к работе / Bot is live (Render)\n⏰ {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
+            text=f"✅ Бот запущен / Bot is live\n⏰ {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
         )
-        write_log("📩 Уведомление о запуске отправлено")
     except Exception as e:
         write_log(f"⚠️ Ошибка уведомления о запуске: {e}")
 
-# === Уведомление о завершении ===
 def notify_shutdown():
     try:
         loop = asyncio.new_event_loop()
@@ -67,57 +115,48 @@ def notify_shutdown():
         loop.run_until_complete(
             bot.send_message(
                 chat_id=X_CHAT_ID,
-                text=f"🛑 Бот завершает работу / Bot is shutting down (Render)\n⏰ {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
+                text=f"🛑 Бот завершает работу / Bot is shutting down\n⏰ {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
             )
         )
-        write_log("📩 Уведомление о завершении отправлено")
     except Exception as e:
         write_log(f"⚠️ Ошибка уведомления о завершении: {e}")
 
 atexit.register(notify_shutdown)
 
-# === Веб-сервер для Render ===
+# === Веб-сервер ===
 async def handle(request):
-    return web.Response(text="✅ SaylorWatchBot is running")
+    return web.Response(text="✅ SaylorWatchBot v4 is running")
 
 def start_web_server():
     app = web.Application()
     app.add_routes([web.get("/", handle)])
     web.run_app(app, host="0.0.0.0", port=PORT)
 
-# === Основной запуск бота ===
+# === Основной запуск ===
 async def run_bot():
-    write_log("🚀 SaylorWatchBot запущен / started (24/7 mode)")
-
     await clear_pending_updates(BOT_TOKEN)
-    write_log("✅ Webhook очищен при старте (cleared successfully)")
-
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("status", status))
-
     await notify_start(BOT_TOKEN, X_CHAT_ID)
 
-    try:
-        await application.run_polling(close_loop=False, allowed_updates=Update.ALL_TYPES)
-    except RuntimeError as e:
-        if "event loop is already running" in str(e):
-            write_log("⚙️ Event loop уже активен — используем fallback режим")
-            await application.initialize()
-            await application.start()
-            await application.updater.start_polling()
-        else:
-            raise e
+    app = Application.builder().token(BOT_TOKEN).build()
 
-# === Точка входа ===
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("uptime", uptime))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("info", info))
+    app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(CommandHandler("restart", restart))
+
+    try:
+        await app.run_polling(close_loop=False, allowed_updates=Update.ALL_TYPES)
+    except RuntimeError:
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling()
+
 def main():
     threading.Thread(target=start_web_server, daemon=True).start()
-    try:
-        asyncio.run(run_bot())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_bot())
+    asyncio.run(run_bot())
 
 if __name__ == "__main__":
     main()
