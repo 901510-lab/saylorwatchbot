@@ -193,7 +193,15 @@ if __name__ == "__main__":
         site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
         await site.start()
 
-        # Отправляем уведомление о старте
+        # Отправляем уведомление в Telegram о старте
         try:
             await bot.send_message(chat_id=CHAT_ID, text="✅ Бот успешно запущен / Bot started successfully")
-        except Exceptio
+        except Exception as e:
+            write_log(f"⚠️ Не удалось отправить стартовое сообщение: {e}")
+
+        # Запуск Telegram-бота и фоновый keep-alive
+        task_bot = asyncio.create_task(app.run_polling())
+        while True:
+            await asyncio.sleep(60)
+
+    asyncio.run(main())
