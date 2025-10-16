@@ -186,6 +186,8 @@ if __name__ == "__main__":
 
     async def main():
         write_log("🚀 SaylorWatchBot запущен / started (24/7 mode)")
+
+        # Настраиваем веб-сервер (если нужно)
         app_web = web.Application()
         app_web.router.add_post("/webhook", handle_webhook)
         runner = web.AppRunner(app_web)
@@ -193,15 +195,13 @@ if __name__ == "__main__":
         site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
         await site.start()
 
-        # Отправляем уведомление в Telegram о старте
+        # Отправляем уведомление о старте
         try:
             await bot.send_message(chat_id=CHAT_ID, text="✅ Бот успешно запущен / Bot started successfully")
         except Exception as e:
             write_log(f"⚠️ Не удалось отправить стартовое сообщение: {e}")
 
-        # Запуск Telegram-бота и фоновый keep-alive
-        task_bot = asyncio.create_task(app.run_polling())
-        while True:
-            await asyncio.sleep(60)
+        # 🚀 Запуск Telegram-бота (встроенный event loop)
+        await app.run_polling(close_loop=False)
 
-    asyncio.run(main())
+    asyncio.get_event_loop().run_until_complete(main())
