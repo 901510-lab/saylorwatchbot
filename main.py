@@ -8,6 +8,13 @@ import time
 import hashlib
 import logging
 from pathlib import Path
+
+# --- Fix for Python 3.13 (imghdr removed) ---
+try:
+    import imghdr
+except ModuleNotFoundError:
+    import imghdr_pure as imghdr
+
 from datetime import datetime, timezone
 
 import requests
