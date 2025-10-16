@@ -182,4 +182,18 @@ async def keep_alive():
         await asyncio.sleep(60)
 
 if __name__ == "__main__":
-    asyncio.run(keep_alive())
+    import asyncio
+
+    async def main():
+        write_log("🚀 SaylorWatchBot запущен / started (24/7 mode)")
+        app_web = web.Application()
+        app_web.router.add_post("/webhook", handle_webhook)
+        runner = web.AppRunner(app_web)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
+        await site.start()
+
+        # Отправляем уведомление о старте
+        try:
+            await bot.send_message(chat_id=CHAT_ID, text="✅ Бот успешно запущен / Bot started successfully")
+        except Exceptio
