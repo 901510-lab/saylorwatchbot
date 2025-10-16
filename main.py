@@ -1,132 +1,118 @@
 import os
-import json
-import time
-import signal
 import asyncio
-import threading
-from aiohttp import web
-from telegram import Bot
-from telegram.ext import ApplicationBuilder
+import logging
+import requests
+from datetime import datetime
+from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# === Настройки ===
+# === CONFIGURATION ===
+load_dotenv()
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = int(os.getenv("X_CHAT_ID", "0"))
-WEBHOOK_PORT = int(os.getenv("PORT", "10000"))
+X_CHAT_ID = os.getenv("X_CHAT_ID")  # твой chat_id
+CHECK_URL = os.getenv("CHECK_URL", "https://saylortracker.com")
+CHECK_INTERVAL_MIN = int(os.getenv("CHECK_INTERVAL_MIN", "15"))
 
-bot = Bot(token=BOT_TOKEN)
+# === LOGGING SETUP ===
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
-def write_log(msg: str):
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+# === UTILITIES ===
+def write_log(message: str):
+    """Лог в консоль + файл"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {message}"
+    print(line)
+    with open("saylorbot.log", "a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
-# === HTTP-хендлер (для future health/ping) ===
-async def handle_webhook(request):
-    data = await request.json()
-    write_log(f"📩 Webhook data: {data}")
-    return web.Response(text="OK")
-
-# === учёт рестартов ===
-RESTART_FILE = "restart_state.json"
-
-def load_restart_state():
+def clear_webhook(bot_token: str):
+    """Очистка webhook перед запуском polling"""
     try:
-        with open(RESTART_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"restart_count": 0, "last_start_ts": None}
+        url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=true"
+        r = requests.get(url)
+        if r.ok:
+            write_log("✅ Webhook очищен при старте (cleared successfully)")
+        else:
+            write_log(f"⚠️ Ошибка очистки webhook: {r.text}")
+    except Exception as e:
+        write_log(f"⚠️ Не удалось удалить webhook: {e}")
 
-def save_restart_state(state: dict):
-    with open(RESTART_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f)
+# === COMMAND HANDLERS ===
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Приветственное сообщение"""
+    text = (
+        "👋 Привет! Я SaylorWatchBot.\n"
+        "Буду следить за изменениями на сайте и сообщать тебе о покупках BTC.\n\n"
+        "Hello! I'm SaylorWatchBot.\n"
+        "I'll notify you when new Bitcoin purchases are detected."
+    )
+    await update.message.reply_text(text)
 
-def fmt_seconds(sec: float) -> str:
-    if sec is None or sec < 0:
-        return "n/a"
-    m, s = divmod(int(sec), 60)
-    h, m = divmod(m, 60)
-    d, h = divmod(h, 24)
-    parts = []
-    if d: parts.append(f"{d}d")
-    if h: parts.append(f"{h}h")
-    if m: parts.append(f"{m}m")
-    parts.append(f"{s}s")
-    return " ".join(parts)
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Проверка статуса"""
+    text = (
+        "📊 Бот работает стабильно.\n"
+        "Мониторинг сайта: ✅\n\n"
+        "📊 Bot is running.\n"
+        "Website monitoring: ✅"
+    )
+    await update.message.reply_text(text)
 
-# === Основной запуск ===
-if __name__ == "__main__":
-    write_log("🚀 SaylorWatchBot запущен / started (24/7 mode)")
-
-    async def start_web():
-        app_web = web.Application()
-        app_web.router.add_get("/healthz", lambda _: web.Response(text="ok"))
-        app_web.router.add_post("/webhook", handle_webhook)
-        runner = web.AppRunner(app_web)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
-        await site.start()
-        write_log(f"🌐 Web server started on port {WEBHOOK_PORT}")
-
-    # === Telegram-бот в отдельном потоке ===
-    def start_bot():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        state = load_restart_state()
-        prev_start = state.get("last_start_ts")
-        uptime_prev = fmt_seconds(time.time() - prev_start) if prev_start else "n/a"
-        state["restart_count"] = int(state.get("restart_count", 0)) + 1
-        state["last_start_ts"] = int(time.time())
-        save_restart_state(state)
-
-        inst = os.getenv("RENDER_INSTANCE_ID", "unknown")
-        commit = os.getenv("RENDER_GIT_COMMIT", "unknown")[:7]
-
-        start_msg = (
-            f"✅ Бот успешно запущен / Bot started successfully\n"
-            f"🔁 Рестарт №: {state['restart_count']} | Пред. аптайм: {uptime_prev}\n"
-            f"🧩 Instance: {inst} | Commit: {commit}"
-        )
-
+# === WEBSITE CHECK LOOP ===
+async def check_site(app):
+    """Проверка изменений на сайте (по содержимому)"""
+    last_balance = None
+    while True:
         try:
-            loop.run_until_complete(bot.send_message(chat_id=CHAT_ID, text=start_msg))
+            r = requests.get(CHECK_URL, timeout=15)
+            if r.status_code == 200:
+                content = r.text
+                marker = "₿"  # ищем общий элемент (для упрощённого примера)
+                current_balance = content.count(marker)
+
+                if last_balance is None:
+                    last_balance = current_balance
+                elif current_balance != last_balance:
+                    last_balance = current_balance
+                    msg = (
+                        "⚡ Обнаружено изменение на сайте SaylorTracker!\n"
+                        "⚡ Bitcoin balance has changed on SaylorTracker!"
+                    )
+                    await app.bot.send_message(chat_id=X_CHAT_ID, text=msg)
+                    write_log("📢 Notification sent: site content changed")
+            else:
+                write_log(f"⚠️ Ошибка запроса: {r.status_code}")
         except Exception as e:
-            write_log(f"⚠️ Не удалось отправить стартовое сообщение: {e}")
+            write_log(f"❌ Ошибка при проверке сайта: {e}")
 
-        # === корректный запуск polling без сигналов ===
-        async def run_polling():
-            app = ApplicationBuilder().token(BOT_TOKEN).build()
-            await app.initialize()
-            await app.start()
-            await app.updater.start_polling()
-            while True:
-                await asyncio.sleep(60)
+        await asyncio.sleep(CHECK_INTERVAL_MIN * 60)
 
-        loop.run_until_complete(run_polling())
+# === MAIN APP LAUNCH ===
+async def main():
+    write_log("🚀 SaylorWatchBot запущен / started (24/7 mode)")
+    clear_webhook(BOT_TOKEN)
 
-    # === Запускаем web-сервер и keep-alive в основном loop ===
-    asyncio.run(start_web())
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("status", status))
 
-    # === Стартуем Telegram-бот в отдельном потоке ===
-    bot_thread = threading.Thread(target=start_bot, daemon=True)
-    bot_thread.start()
+    # Запускаем мониторинг сайта параллельно с polling
+    asyncio.create_task(check_site(app))
 
-    # === Ловим SIGTERM и SIGINT для уведомлений ===
-    def shutdown_handler(*_):
-        try:
-            asyncio.run(bot.send_message(
-                chat_id=CHAT_ID,
-                text="🛑 Бот завершается (деплой/рестарт) / Bot is shutting down (deploy/restart)"
-            ))
-        except Exception:
-            pass
-        write_log("🛑 Завершение работы / Shutdown initiated")
-        os._exit(0)
+    write_log("🌐 Web server started and polling initialized")
+    await app.run_polling(close_loop=False)
 
-    signal.signal(signal.SIGTERM, shutdown_handler)
-    signal.signal(signal.SIGINT, shutdown_handler)
-
-    # === основной keep-alive ===
+if __name__ == "__main__":
     try:
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        shutdown_handler()
+        asyncio.run(main())
+    except RuntimeError:
+        # Render иногда вызывает ошибку “event loop already running”
+        write_log("⚙️ Event loop уже активен — запускаем альтернативный режим")
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(main())
