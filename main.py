@@ -15,11 +15,10 @@ WEBHOOK_PORT = int(os.getenv("PORT", "10000"))
 
 bot = Bot(token=BOT_TOKEN)
 
-# === Логгер ===
 def write_log(msg: str):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
-# === HTTP-хендлер (для будущих проверок) ===
+# === HTTP-хендлер (для future health/ping) ===
 async def handle_webhook(request):
     data = await request.json()
     write_log(f"📩 Webhook data: {data}")
@@ -58,6 +57,7 @@ if __name__ == "__main__":
 
     async def start_web():
         app_web = web.Application()
+        app_web.router.add_get("/healthz", lambda _: web.Response(text="ok"))
         app_web.router.add_post("/webhook", handle_webhook)
         runner = web.AppRunner(app_web)
         await runner.setup()
@@ -70,7 +70,6 @@ if __name__ == "__main__":
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        # учёт рестартов
         state = load_restart_state()
         prev_start = state.get("last_start_ts")
         uptime_prev = fmt_seconds(time.time() - prev_start) if prev_start else "n/a"
@@ -92,22 +91,25 @@ if __name__ == "__main__":
         except Exception as e:
             write_log(f"⚠️ Не удалось отправить стартовое сообщение: {e}")
 
-        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        # === корректный запуск polling без сигналов ===
+        async def run_polling():
+            app = ApplicationBuilder().token(BOT_TOKEN).build()
+            await app.initialize()
+            await app.start()
+            await app.updater.start_polling()
+            while True:
+                await asyncio.sleep(60)
 
-        try:
-            app.run_polling()
-        except Exception as e:
-            write_log(f"❌ Ошибка при запуске run_polling: {e}")
+        loop.run_until_complete(run_polling())
 
-    # === запуск web-сервера и keep-alive в основном loop ===
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_web())
+    # === Запускаем web-сервер и keep-alive в основном loop ===
+    asyncio.run(start_web())
 
-    # === запуск бота в отдельном потоке ===
+    # === Стартуем Telegram-бот в отдельном потоке ===
     bot_thread = threading.Thread(target=start_bot, daemon=True)
     bot_thread.start()
 
-    # === ловим сигналы завершения и шлём уведомление ===
+    # === Ловим SIGTERM и SIGINT для уведомлений ===
     def shutdown_handler(*_):
         try:
             asyncio.run(bot.send_message(
@@ -122,7 +124,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
 
-    # === основной цикл (keep-alive) ===
+    # === основной keep-alive ===
     try:
         while True:
             time.sleep(60)
