@@ -97,27 +97,38 @@ async def run_bot():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
 
-    # запускаем мониторинг сайта
     asyncio.create_task(check_site(app))
-
     write_log("🌐 Web server started and polling initialized")
 
-    # вечный цикл polling с защитой от ошибок
+    # вечный цикл с контролем healthcheck
     while True:
         try:
-            await app.run_polling()
+            await app.initialize()
+            await app.start()
+            write_log("🤖 Polling запущен")
+
+            # параллельно проверяем сайт
+            while True:
+                await asyncio.sleep(60)  # Render не любит idle без активности
+                # health ping
+                try:
+                    requests.get("https://render.com", timeout=5)
+                except Exception:
+                    pass
         except Exception as e:
             write_log(f"💥 Ошибка polling: {e}")
             write_log("♻️ Перезапуск через 10 секунд...")
             await asyncio.sleep(10)
+        finally:
+            await app.stop()
+            await app.shutdown()
 
-# === ENTRY POINT (совместимо с Python 3.12) ===
+# === ENTRY POINT ===
 if __name__ == "__main__":
     try:
         asyncio.run(run_bot())
     except RuntimeError:
-        # если Render запускает уже активный event loop — создаём новый вручную
-        write_log("⚙️ Перехват активного event loop — создаётся новый цикл")
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        new_loop.run_until_complete(run_bot())
+        write_log("⚙️ Создание нового event loop для Render")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_bot())
