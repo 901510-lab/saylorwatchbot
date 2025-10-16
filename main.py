@@ -13,7 +13,15 @@ from pathlib import Path
 try:
     import imghdr
 except ModuleNotFoundError:
-    import imghdr_pure as imghdr
+    import mimetypes
+
+    class imghdr:
+        @staticmethod
+        def what(file_path):
+            mime = mimetypes.guess_type(file_path)[0]
+            if mime and mime.startswith("image/"):
+                return mime.split("/")[-1]
+            return None
 
 from datetime import datetime, timezone
 
