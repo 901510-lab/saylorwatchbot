@@ -2,7 +2,6 @@ import os
 import asyncio
 import logging
 import datetime
-import atexit
 from dotenv import load_dotenv
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 start_time = datetime.datetime.now()
 
 
-def write_log(msg):
+def write_log(msg: str):
     print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
     logger.info(msg)
 
@@ -48,7 +47,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/status — аптайм и состояние\n"
         "/uptime — время работы\n"
         "/info — информация о системе\n"
-        "/clear — очистить все сообщения (админ)\n"
         "/restart — перезапуск бота (админ)\n"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
@@ -98,45 +96,19 @@ async def notify_start(token, chat_id):
         write_log(f"⚠️ Ошибка уведомления о запуске: {e}")
 
 
-def notify_shutdown():
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        bot = Bot(BOT_TOKEN)
-        loop.run_until_complete(
-            bot.send_message(
-                chat_id=X_CHAT_ID,
-                text=f"🛑 Бот завершает работу / Bot is shutting down\n⏰ {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
-            )
-        )
-    except Exception as e:
-        write_log(f"⚠️ Ошибка при завершении: {e}")
-    finally:
-        try:
-            loop.close()
-        except Exception:
-            pass
-
-
-atexit.register(notify_shutdown)
-
-
 # === Авто-пинг ===
 async def ping_alive(bot: Bot):
     while True:
-        await asyncio.sleep(6 * 60 * 60)
+        await asyncio.sleep(6 * 60 * 60)  # каждые 6 часов
         uptime = datetime.datetime.now() - start_time
         try:
-            await bot.send_message(
-                chat_id=X_CHAT_ID,
-                text=f"✅ Still alive (uptime: {uptime})"
-            )
+            await bot.send_message(chat_id=X_CHAT_ID, text=f"✅ Still alive (uptime: {uptime})")
         except Exception as e:
             write_log(f"⚠️ Ошибка авто-пинга: {e}")
 
 
 # === Основной запуск ===
-async def main():
+async def start_bot():
     await clear_pending_updates(BOT_TOKEN)
     await notify_start(BOT_TOKEN, X_CHAT_ID)
 
@@ -153,8 +125,15 @@ async def main():
     asyncio.create_task(ping_alive(bot))
 
     write_log("🚀 SaylorWatchBot запущен / polling mode активен")
-    await app.run_polling(close_loop=False, allowed_updates=Update.ALL_TYPES)
+
+    # Этот вызов управляет своим event loop — не создаём новый
+    app.run_polling(close_loop=False, allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(start_bot())
+    except KeyboardInterrupt:
+        print("🛑 Бот остановлен вручную")
+    finally:
+        print("✅ Завершение работы Render-инстанса")
