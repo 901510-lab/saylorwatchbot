@@ -3,4 +3,5 @@ apscheduler>=3.10.4
 requests>=2.31.0
 python-dotenv
 aiohttp
+beautifulsoup4
 certifi>=2023.7.22

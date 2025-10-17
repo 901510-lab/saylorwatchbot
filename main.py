@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from aiohttp import web
+from bs4 import BeautifulSoup
 
 # === Инициализация ===
 load_dotenv()
@@ -20,26 +21,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 start_time = datetime.datetime.now()
 
-
 def write_log(msg: str):
     print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
     logger.info(msg)
-
 
 # === Команды ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет! Бот активен и работает 24/7 🚀")
 
-
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     await update.message.reply_text(f"✅ Бот онлайн\n⏱ Аптайм: {uptime}")
 
-
 async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     await update.message.reply_text(f"⏱ Аптайм: {uptime}")
-
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
@@ -52,7 +48,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/restart — перезапуск Render-инстанса (админ)\n"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
-
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
@@ -70,7 +65,6 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Доступ запрещён.")
@@ -78,22 +72,17 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Перезапуск Render-инстанса...")
     os._exit(0)
 
-
 # === Очистка сообщений ===
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Доступ запрещён.")
         return
-
     chat_id = update.message.chat_id
     await update.message.reply_text("🧹 Начинаю очистку сообщений...")
-
     bot = context.bot
     deleted = 0
-
     try:
         async for msg in bot.get_chat(chat_id).iter_history(limit=200):
-            # Удаляем только сообщения, отправленные ботом
             if msg.from_user and msg.from_user.is_bot:
                 try:
                     await bot.delete_message(chat_id, msg.message_id)
@@ -105,13 +94,11 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Ошибка очистки: {e}")
 
-
 # === Очистка апдейтов ===
 async def clear_pending_updates(token):
     bot = Bot(token)
     await bot.delete_webhook(drop_pending_updates=True)
     write_log("🧹 Очередь обновлений очищена")
-
 
 # === Уведомления ===
 async def notify_start(token, chat_id):
@@ -126,19 +113,17 @@ async def notify_start(token, chat_id):
     except Exception as e:
         write_log(f"⚠️ Ошибка уведомления о запуске: {e}")
 
-
 # === Авто-пинг ===
 async def ping_alive(bot: Bot):
     while True:
-        await asyncio.sleep(6 * 60 * 60)  # каждые 6 часов
+        await asyncio.sleep(6 * 60 * 60)
         uptime = datetime.datetime.now() - start_time
         try:
             await bot.send_message(chat_id=X_CHAT_ID, text=f"✅ Still alive (uptime: {uptime})")
         except Exception as e:
             write_log(f"⚠️ Ошибка авто-пинга: {e}")
 
-
-# === Health-check сервер для Render ===
+# === Health-check сервер ===
 async def handle(request):
     return web.Response(text="✅ SaylorWatchBot is alive")
 
@@ -151,15 +136,62 @@ async def start_healthcheck_server():
     await site.start()
     write_log(f"🌐 Health-check сервер запущен на порту {PORT}")
 
+# === Мониторинг SaylorTracker ===
+LAST_PRICE_FILE = "last_price.txt"
+
+async def fetch_saylor_price():
+    """Получает текущую цену MicroStrategy с сайта saylortracker.com"""
+    import aiohttp
+    url = "https://saylortracker.com/"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            html = await resp.text()
+    soup = BeautifulSoup(html, "html.parser")
+    elem = soup.find(string=lambda t: "Average BTC Price" in t)
+    if not elem:
+        return None
+    price_tag = elem.find_parent("div").find_next_sibling("div")
+    if not price_tag:
+        return None
+    return price_tag.text.strip()
+
+async def monitor_saylor_price(bot: Bot):
+    """Отслеживает изменение средней цены MicroStrategy"""
+    last_price = None
+    if os.path.exists(LAST_PRICE_FILE):
+        with open(LAST_PRICE_FILE, "r") as f:
+            last_price = f.read().strip()
+
+    while True:
+        try:
+            current_price = await fetch_saylor_price()
+            if current_price and current_price != last_price:
+                direction = ""
+                try:
+                    c_val = float(current_price.replace("$", "").replace(",", ""))
+                    l_val = float(last_price.replace("$", "").replace(",", "")) if last_price else c_val
+                    direction = "🔺" if c_val > l_val else "🔻" if c_val < l_val else "➖"
+                except Exception:
+                    direction = "💰"
+                message = f"{direction} Цена MicroStrategy изменилась:\nБыла: {last_price or 'N/A'} → Стала: {current_price}"
+                await bot.send_message(chat_id=X_CHAT_ID, text=message)
+                write_log(message)
+                last_price = current_price
+                with open(LAST_PRICE_FILE, "w") as f:
+                    f.write(current_price)
+            else:
+                write_log(f"ℹ️ Проверка SaylorTracker — без изменений ({current_price})")
+        except Exception as e:
+            write_log(f"⚠️ Ошибка мониторинга SaylorTracker: {e}")
+
+        await asyncio.sleep(15 * 60)  # каждые 15 минут
 
 # === Основной запуск ===
 async def main():
     write_log("🚀 Инициализация SaylorWatchBot...")
-
     await clear_pending_updates(BOT_TOKEN)
     await notify_start(BOT_TOKEN, X_CHAT_ID)
 
-    # Telegram Application
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
@@ -169,17 +201,17 @@ async def main():
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("clear", clear))
 
-    # Доп. задачи
-    asyncio.create_task(ping_alive(Bot(BOT_TOKEN)))
+    # фоновые задачи
+    bot = Bot(BOT_TOKEN)
+    asyncio.create_task(ping_alive(bot))
     asyncio.create_task(start_healthcheck_server())
+    asyncio.create_task(monitor_saylor_price(bot))
 
-    # Запуск polling
     write_log("✅ Бот успешно запущен и работает в режиме polling")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
     await app.updater.idle()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
