@@ -5,11 +5,13 @@ import datetime
 from dotenv import load_dotenv
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from aiohttp import web
 
 # === Инициализация ===
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 X_CHAT_ID = os.getenv("X_CHAT_ID")
+PORT = int(os.environ.get("PORT", 10000))
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -18,21 +20,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 start_time = datetime.datetime.now()
 
+
 def write_log(msg: str):
     print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
     logger.info(msg)
+
 
 # === Команды ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет! Бот активен и работает 24/7 🚀")
 
+
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     await update.message.reply_text(f"✅ Бот онлайн\n⏱ Аптайм: {uptime}")
 
+
 async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     await update.message.reply_text(f"⏱ Аптайм: {uptime}")
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
@@ -44,6 +51,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/restart — перезапуск бота (админ)\n"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
+
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
@@ -61,6 +69,7 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Доступ запрещён.")
@@ -68,11 +77,13 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Перезапуск Render-инстанса...")
     os._exit(0)
 
+
 # === Очистка апдейтов ===
 async def clear_pending_updates(token):
     bot = Bot(token)
     await bot.delete_webhook(drop_pending_updates=True)
     write_log("🧹 Очередь обновлений очищена")
+
 
 # === Уведомления ===
 async def notify_start(token, chat_id):
@@ -85,6 +96,7 @@ async def notify_start(token, chat_id):
     except Exception as e:
         write_log(f"⚠️ Ошибка уведомления о запуске: {e}")
 
+
 # === Авто-пинг ===
 async def ping_alive(bot: Bot):
     while True:
@@ -95,25 +107,48 @@ async def ping_alive(bot: Bot):
         except Exception as e:
             write_log(f"⚠️ Ошибка авто-пинга: {e}")
 
+
+# === Health-check сервер ===
+async def handle(request):
+    return web.Response(text="✅ SaylorWatchBot is alive")
+
+async def start_healthcheck_server():
+    app = web.Application()
+    app.add_routes([web.get("/", handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    write_log(f"🌐 Health-check сервер запущен на порту {PORT}")
+
+
 # === Основной запуск ===
-def main():
+async def main():
     write_log("🚀 Инициализация SaylorWatchBot...")
-    application = Application.builder().token(BOT_TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("status", status))
-    application.add_handler(CommandHandler("uptime", uptime))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("info", info))
-    application.add_handler(CommandHandler("restart", restart))
+    await clear_pending_updates(BOT_TOKEN)
+    await notify_start(BOT_TOKEN, X_CHAT_ID)
 
-    async def on_startup(app: Application):
-        await clear_pending_updates(BOT_TOKEN)
-        await notify_start(BOT_TOKEN, X_CHAT_ID)
-        asyncio.create_task(ping_alive(Bot(BOT_TOKEN)))
-        write_log("✅ Бот успешно запущен и работает в режиме polling")
+    # Telegram Application
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("uptime", uptime))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("info", info))
+    app.add_handler(CommandHandler("restart", restart))
 
-    application.run_polling(on_startup=on_startup, close_loop=False, allowed_updates=Update.ALL_TYPES)
+    # Доп. задачи
+    asyncio.create_task(ping_alive(Bot(BOT_TOKEN)))
+    asyncio.create_task(start_healthcheck_server())
+
+    # Запуск polling
+    write_log("✅ Бот успешно запущен и работает в режиме polling")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.idle()
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
