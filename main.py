@@ -78,7 +78,6 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Доступ запрещён.")
         return
     chat_id = update.message.chat_id
-    await update.message.reply_text("🧹 Начинаю очистку сообщений...")
     bot = context.bot
     deleted = 0
     try:
@@ -87,12 +86,17 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await bot.delete_message(chat_id, msg.message_id)
                     deleted += 1
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.15)
                 except Exception:
                     pass
-        await bot.send_message(chat_id, f"✅ Очистка завершена. Удалено сообщений: {deleted}")
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Ошибка очистки: {e}")
+        await update.message.reply_text(f"⚠️ Ошибка при удалении: {e}")
+        return
+    await update.message.reply_text(
+        f"🧹 Удалено сообщений бота: {deleted}\n"
+        "❗ Telegram не позволяет удалять ваши собственные сообщения.\n"
+        "Чтобы очистить весь чат — используйте 'Удалить чат' вручную."
+    )
 
 # === Очистка апдейтов ===
 async def clear_pending_updates(token):
@@ -136,53 +140,71 @@ async def start_healthcheck_server():
     await site.start()
     write_log(f"🌐 Health-check сервер запущен на порту {PORT}")
 
-# === Мониторинг SaylorTracker ===
-LAST_PRICE_FILE = "last_price.txt"
+# === Мониторинг покупок MicroStrategy ===
+LAST_PURCHASE_FILE = "last_purchase.txt"
 
-async def fetch_saylor_price():
-    """Получает текущую цену MicroStrategy с сайта saylortracker.com"""
+async def fetch_latest_purchase():
+    """Извлекает последнюю запись из таблицы покупок MicroStrategy на saylortracker.com"""
     import aiohttp
     url = "https://saylortracker.com/"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             html = await resp.text()
-    soup = BeautifulSoup(html, "html.parser")
-    elem = soup.find(string=lambda t: "Average BTC Price" in t)
-    if not elem:
-        return None
-    price_tag = elem.find_parent("div").find_next_sibling("div")
-    if not price_tag:
-        return None
-    return price_tag.text.strip()
 
-async def monitor_saylor_price(bot: Bot):
-    """Отслеживает изменение средней цены MicroStrategy"""
-    last_price = None
-    if os.path.exists(LAST_PRICE_FILE):
-        with open(LAST_PRICE_FILE, "r") as f:
-            last_price = f.read().strip()
+    soup = BeautifulSoup(html, "html.parser")
+
+    table_title = soup.find(string=lambda t: "Purchase History" in t or "Purchases" in t)
+    if not table_title:
+        return None
+
+    table = table_title.find_parent("div").find_next("table")
+    if not table:
+        return None
+
+    first_row = table.find("tbody").find("tr")
+    if not first_row:
+        return None
+
+    cells = [c.get_text(strip=True) for c in first_row.find_all("td")]
+    if len(cells) < 4:
+        return None
+
+    # Пример: ['Oct 12, 2025', '3,000', '$59,900', '$180M']
+    return {
+        "date": cells[0],
+        "amount": cells[1],
+        "total": cells[3]
+    }
+
+async def monitor_saylor_purchases(bot: Bot):
+    """Отслеживает новые покупки биткойна Майклом Сэйлором"""
+    last_date = None
+    if os.path.exists(LAST_PURCHASE_FILE):
+        with open(LAST_PURCHASE_FILE, "r") as f:
+            last_date = f.read().strip()
 
     while True:
         try:
-            current_price = await fetch_saylor_price()
-            if current_price and current_price != last_price:
-                direction = ""
-                try:
-                    c_val = float(current_price.replace("$", "").replace(",", ""))
-                    l_val = float(last_price.replace("$", "").replace(",", "")) if last_price else c_val
-                    direction = "🔺" if c_val > l_val else "🔻" if c_val < l_val else "➖"
-                except Exception:
-                    direction = "💰"
-                message = f"{direction} Цена MicroStrategy изменилась:\nБыла: {last_price or 'N/A'} → Стала: {current_price}"
-                await bot.send_message(chat_id=X_CHAT_ID, text=message)
-                write_log(message)
-                last_price = current_price
-                with open(LAST_PRICE_FILE, "w") as f:
-                    f.write(current_price)
+            purchase = await fetch_latest_purchase()
+            if not purchase:
+                write_log("⚠️ Не удалось получить данные о покупках MicroStrategy.")
             else:
-                write_log(f"ℹ️ Проверка SaylorTracker — без изменений ({current_price})")
+                if purchase["date"] != last_date:
+                    message = (
+                        f"💰 Новая покупка Bitcoin!\n"
+                        f"📅 Дата: {purchase['date']}\n"
+                        f"₿ Количество: {purchase['amount']}\n"
+                        f"🏦 Сумма: {purchase['total']}"
+                    )
+                    await bot.send_message(chat_id=X_CHAT_ID, text=message)
+                    write_log(message)
+                    last_date = purchase["date"]
+                    with open(LAST_PURCHASE_FILE, "w") as f:
+                        f.write(last_date)
+                else:
+                    write_log(f"ℹ️ Проверка покупок MicroStrategy — без изменений ({purchase['date']})")
         except Exception as e:
-            write_log(f"⚠️ Ошибка мониторинга SaylorTracker: {e}")
+            write_log(f"⚠️ Ошибка мониторинга покупок: {e}")
 
         await asyncio.sleep(15 * 60)  # каждые 15 минут
 
@@ -201,11 +223,10 @@ async def main():
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("clear", clear))
 
-    # фоновые задачи
     bot = Bot(BOT_TOKEN)
     asyncio.create_task(ping_alive(bot))
     asyncio.create_task(start_healthcheck_server())
-    asyncio.create_task(monitor_saylor_price(bot))
+    asyncio.create_task(monitor_saylor_purchases(bot))
 
     write_log("✅ Бот успешно запущен и работает в режиме polling")
     await app.initialize()
