@@ -48,7 +48,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/status — аптайм и состояние\n"
         "/uptime — время работы\n"
         "/info — информация о системе\n"
-        "/restart — перезапуск бота (админ)\n"
+        "/clear — удалить сообщения бота\n"
+        "/restart — перезапуск Render-инстанса (админ)\n"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
@@ -78,6 +79,33 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os._exit(0)
 
 
+# === Очистка сообщений ===
+async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != str(X_CHAT_ID):
+        await update.message.reply_text("⛔ Доступ запрещён.")
+        return
+
+    chat_id = update.message.chat_id
+    await update.message.reply_text("🧹 Начинаю очистку сообщений...")
+
+    bot = context.bot
+    deleted = 0
+
+    try:
+        async for msg in bot.get_chat(chat_id).iter_history(limit=200):
+            # Удаляем только сообщения, отправленные ботом
+            if msg.from_user and msg.from_user.is_bot:
+                try:
+                    await bot.delete_message(chat_id, msg.message_id)
+                    deleted += 1
+                    await asyncio.sleep(0.2)
+                except Exception:
+                    pass
+        await bot.send_message(chat_id, f"✅ Очистка завершена. Удалено сообщений: {deleted}")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Ошибка очистки: {e}")
+
+
 # === Очистка апдейтов ===
 async def clear_pending_updates(token):
     bot = Bot(token)
@@ -89,9 +117,11 @@ async def clear_pending_updates(token):
 async def notify_start(token, chat_id):
     try:
         bot = Bot(token)
+        commit = os.getenv("RENDER_GIT_COMMIT", "N/A")
         await bot.send_message(
             chat_id=chat_id,
-            text=f"✅ Бот запущен / Bot is live\n⏰ {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
+            text=f"✅ Бот запущен / Bot is live\n🧩 Commit: `{commit}`\n⏰ {datetime.datetime.now():%Y-%m-%d %H:%M:%S}",
+            parse_mode="Markdown"
         )
     except Exception as e:
         write_log(f"⚠️ Ошибка уведомления о запуске: {e}")
@@ -100,7 +130,7 @@ async def notify_start(token, chat_id):
 # === Авто-пинг ===
 async def ping_alive(bot: Bot):
     while True:
-        await asyncio.sleep(6 * 60 * 60)
+        await asyncio.sleep(6 * 60 * 60)  # каждые 6 часов
         uptime = datetime.datetime.now() - start_time
         try:
             await bot.send_message(chat_id=X_CHAT_ID, text=f"✅ Still alive (uptime: {uptime})")
@@ -108,7 +138,7 @@ async def ping_alive(bot: Bot):
             write_log(f"⚠️ Ошибка авто-пинга: {e}")
 
 
-# === Health-check сервер ===
+# === Health-check сервер для Render ===
 async def handle(request):
     return web.Response(text="✅ SaylorWatchBot is alive")
 
@@ -137,6 +167,7 @@ async def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("info", info))
     app.add_handler(CommandHandler("restart", restart))
+    app.add_handler(CommandHandler("clear", clear))
 
     # Доп. задачи
     asyncio.create_task(ping_alive(Bot(BOT_TOKEN)))
