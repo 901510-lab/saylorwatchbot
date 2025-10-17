@@ -2,9 +2,7 @@ import os
 import asyncio
 import logging
 import datetime
-import threading
 import atexit
-from aiohttp import web
 from dotenv import load_dotenv
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -12,7 +10,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # === Инициализация ===
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-X_CHAT_ID = os.getenv("X_CHAT_ID")  # твой Telegram Chat ID (админ)
+X_CHAT_ID = os.getenv("X_CHAT_ID")
 PORT = int(os.environ.get("PORT", 10000))
 
 logging.basicConfig(
@@ -22,21 +20,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 start_time = datetime.datetime.now()
 
+
 def write_log(msg):
     print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
     logger.info(msg)
+
 
 # === Команды ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет! Бот активен и работает 24/7 🚀")
 
+
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     await update.message.reply_text(f"✅ Бот онлайн\n⏱ Аптайм: {uptime}")
 
+
 async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     await update.message.reply_text(f"⏱ Аптайм: {uptime}")
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
@@ -49,6 +52,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/restart — перезапуск бота (админ)\n"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
+
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
@@ -66,21 +70,6 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != str(X_CHAT_ID):
-        await update.message.reply_text("⛔ Доступ запрещён.")
-        return
-    chat_id = update.message.chat_id
-    await update.message.reply_text("🧹 Очистка сообщений...")
-    try:
-        async for msg in context.bot.get_chat(chat_id).iter_history():
-            try:
-                await context.bot.delete_message(chat_id, msg.message_id)
-            except Exception:
-                pass
-        await context.bot.send_message(chat_id, "✅ Сообщения очищены")
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Ошибка очистки: {e}")
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
@@ -89,15 +78,13 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Перезапуск Render-инстанса...")
     os._exit(0)
 
+
 # === Очистка апдейтов ===
 async def clear_pending_updates(token):
     bot = Bot(token)
-    updates = await bot.get_updates()
-    if updates:
-        await bot.delete_webhook(drop_pending_updates=True)
-        write_log(f"🧹 Очередь очищена ({len(updates)})")
-    else:
-        write_log("🧹 Очередь пуста")
+    await bot.delete_webhook(drop_pending_updates=True)
+    write_log("🧹 Очередь обновлений очищена")
+
 
 # === Уведомления ===
 async def notify_start(token, chat_id):
@@ -110,6 +97,7 @@ async def notify_start(token, chat_id):
     except Exception as e:
         write_log(f"⚠️ Ошибка уведомления о запуске: {e}")
 
+
 def notify_shutdown():
     try:
         loop = asyncio.new_event_loop()
@@ -121,22 +109,22 @@ def notify_shutdown():
                 text=f"🛑 Бот завершает работу / Bot is shutting down\n⏰ {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
             )
         )
-    except RuntimeError as e:
-        write_log(f"⚠️ Игнорируем RuntimeError при завершении: {e}")
     except Exception as e:
-        write_log(f"⚠️ Ошибка уведомления о завершении: {e}")
+        write_log(f"⚠️ Ошибка при завершении: {e}")
     finally:
         try:
             loop.close()
         except Exception:
             pass
 
+
 atexit.register(notify_shutdown)
 
-# === Авто-пинг (alive check) ===
+
+# === Авто-пинг ===
 async def ping_alive(bot: Bot):
     while True:
-        await asyncio.sleep(6 * 60 * 60)  # каждые 6 часов
+        await asyncio.sleep(6 * 60 * 60)
         uptime = datetime.datetime.now() - start_time
         try:
             await bot.send_message(
@@ -146,17 +134,9 @@ async def ping_alive(bot: Bot):
         except Exception as e:
             write_log(f"⚠️ Ошибка авто-пинга: {e}")
 
-# === Веб-сервер ===
-async def handle(request):
-    return web.Response(text="✅ SaylorWatchBot v4.1 is running")
-
-def start_web_server():
-    app = web.Application()
-    app.add_routes([web.get("/", handle)])
-    web.run_app(app, host="0.0.0.0", port=PORT)
 
 # === Основной запуск ===
-async def run_bot():
+async def main():
     await clear_pending_updates(BOT_TOKEN)
     await notify_start(BOT_TOKEN, X_CHAT_ID)
 
@@ -167,23 +147,14 @@ async def run_bot():
     app.add_handler(CommandHandler("uptime", uptime))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("info", info))
-    app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("restart", restart))
 
-    # Авто-пинг каждые 6 часов
     bot = Bot(BOT_TOKEN)
     asyncio.create_task(ping_alive(bot))
 
-    try:
-        await app.run_polling(close_loop=False, allowed_updates=Update.ALL_TYPES)
-    except RuntimeError:
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling()
+    write_log("🚀 SaylorWatchBot запущен / polling mode активен")
+    await app.run_polling(close_loop=False, allowed_updates=Update.ALL_TYPES)
 
-def main():
-    threading.Thread(target=start_web_server, daemon=True).start()
-    asyncio.run(run_bot())
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
