@@ -85,12 +85,12 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deleted = 0
 
     try:
-        # Получаем последние сообщения
-        messages = await bot.get_chat_history(chat_id, limit=100)
-        for msg in messages:
-            if msg.from_user and msg.from_user.is_bot:
+        # получаем последние 100 апдейтов и удаляем только сообщения бота
+        updates = await bot.get_updates(limit=100)
+        for upd in updates:
+            if upd.message and upd.message.from_user and upd.message.from_user.is_bot:
                 try:
-                    await bot.delete_message(chat_id, msg.message_id)
+                    await bot.delete_message(chat_id, upd.message.message_id)
                     deleted += 1
                     await asyncio.sleep(0.15)
                 except Exception:
@@ -102,7 +102,7 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🧹 Удалено сообщений бота: {deleted}\n"
         "❗ Telegram не позволяет удалять ваши собственные сообщения.\n"
-        "Чтобы очистить весь чат — используйте 'Удалить чат' вручную."
+        "Чтобы полностью очистить — используйте 'Удалить чат' вручную."
     )
 
 # === Очистка апдейтов ===
