@@ -5,3 +5,4 @@ python-dotenv
 aiohttp
 beautifulsoup4
 certifi>=2023.7.22
+nest_asyncio==1.6.0

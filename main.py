@@ -115,18 +115,22 @@ async def main():
 # 🧩 Безопасный запуск
 # ----------------------------------------------------
 if __name__ == "__main__":
-    try:
+    import nest_asyncio
+    nest_asyncio.apply()  # ✅ разрешает повторное использование активного event loop
+
+    async def safe_start():
         try:
-            loop = asyncio.get_running_loop()
-            logger.info("🔁 Обнаружен активный event loop — используем его.")
-            loop.create_task(main())
-        except RuntimeError:
-            logger.info("🌀 Активный event loop не найден — создаём новый.")
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(main())
-    except Conflict:
-        logger.warning("⚠️ Другой экземпляр бота уже запущен — останавливаем этот процесс.")
-    except Exception as e:
-        logger.error(f"❌ Ошибка при запуске бота: {e}")
+            await main()
+        except Conflict:
+            logger.warning("⚠️ Другой экземпляр бота уже запущен — останавливаем этот процесс.")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при запуске бота: {e}")
+
+    try:
+        loop = asyncio.get_running_loop()
+        logger.info("🔁 Активный event loop уже запущен — добавляем задачу бота.")
+        loop.create_task(safe_start())
+    except RuntimeError:
+        logger.info("🌀 Активный event loop не найден — создаём новый.")
+        asyncio.run(safe_start())
 
