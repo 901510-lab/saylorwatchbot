@@ -7,6 +7,7 @@ from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from aiohttp import web
 from bs4 import BeautifulSoup
+from telegram.request import HTTPXRequest
 
 # === Инициализация ===
 load_dotenv()
@@ -21,10 +22,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 start_time = datetime.datetime.now()
 
-
 def write_log(msg: str):
     print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
     logger.info(msg)
+
+async def main():
+    logger.info("🚀 Инициализация SaylorWatchBot...")
+
+    # Создаём объект запроса с увеличенным пулом соединений и таймаутами
+    from telegram.request import HTTPXRequest
+    request = HTTPXRequest(connection_pool_size=50, read_timeout=30, write_timeout=30)
+
+    # Строим приложение с кастомным HTTP-пулом
+    app = ApplicationBuilder().token(BOT_TOKEN).request(request).build()
 
 # === Команды ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
