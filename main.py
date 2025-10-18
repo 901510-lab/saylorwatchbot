@@ -49,6 +49,37 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
+# === Очистка сообщений ===
+async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != str(X_CHAT_ID):
+        await update.message.reply_text("⛔ Доступ запрещён.")
+        return
+
+    chat_id = update.message.chat_id
+    bot = context.bot
+    deleted = 0
+
+    try:
+        # Правильное получение истории сообщений
+        messages = await bot.get_chat_history(chat_id, limit=200)
+        for msg in messages:
+            if msg.from_user and msg.from_user.is_bot:
+                try:
+                    await bot.delete_message(chat_id, msg.message_id)
+                    deleted += 1
+                    await asyncio.sleep(0.15)
+                except Exception:
+                    pass
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Ошибка при удалении: {e}")
+        return
+
+    await update.message.reply_text(
+        f"🧹 Удалено сообщений бота: {deleted}\n"
+        "❗ Telegram не позволяет удалять ваши собственные сообщения.\n"
+        "Чтобы очистить весь чат — используйте 'Удалить чат' вручную."
+    )
+
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Доступ запрещён.")
