@@ -229,10 +229,10 @@ async def main():
     asyncio.create_task(monitor_saylor_purchases(bot))
 
     write_log("✅ Бот успешно запущен и работает в режиме polling")
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    await app.updater.idle()
+    asyncio.create_task(ping_alive(bot))
+    asyncio.create_task(start_healthcheck_server())
+    asyncio.create_task(monitor_saylor_purchases(bot))
+    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
