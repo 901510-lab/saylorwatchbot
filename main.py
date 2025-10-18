@@ -114,6 +114,40 @@ async def clear_pending_updates(token):
     except Exception as e:
         write_log(f"⚠️ Ошибка при очистке webhook: {e}")
 
+        # === Команда /clear ===
+async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет последние сообщения бота"""
+    if str(update.effective_user.id) != str(X_CHAT_ID):
+        await update.message.reply_text("⛔ Доступ запрещён.")
+        return
+
+    chat_id = update.message.chat_id
+    bot = context.bot
+    deleted = 0
+
+    try:
+        # Ограничим число апдейтов до 30 (вместо 100)
+        updates = await bot.get_updates(limit=30)
+
+        # Удаляем сообщения постепенно (1–2/сек)
+        for upd in updates:
+            if upd.message and upd.message.from_user and upd.message.from_user.is_bot:
+                try:
+                    await bot.delete_message(chat_id, upd.message.message_id)
+                    deleted += 1
+                    await asyncio.sleep(0.5)  # 👈 замедление — ключевой момент
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    except Exception as e:
+        await update.message.reply_text(
+            f"⚠️ Ошибка при удалении: {e}\n"
+            "Совет: подожди 10–15 секунд и попробуй ещё раз."
+        )
+        return
+
+    await update.message.reply_text(f"🧹 Удалено сообщений бота: {deleted}")
+
 # === Уведомление о старте ===
 async def notify_start(token, chat_id):
     try:
