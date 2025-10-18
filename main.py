@@ -83,14 +83,16 @@ async def ping_alive():
 # 🚀 Основной запуск
 # ----------------------------------------------------
 async def main():
-    request = HTTPXRequest(connection_pool_size=50, read_timeout=30, write_timeout=30)
-
-    app = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .request(request)
-        .build()
-    )
+    logger.info("🚀 Инициализация SaylorWatchBot...")
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("🧹 Webhook очищен перед запуском polling")
+        await app.initialize()
+        await app.start()
+        logger.info("✅ Бот успешно запущен и работает в режиме polling")
+        await app.updater.start_polling()
+    except Conflict:
+        logger.warning("⚠️ Обнаружен другой экземпляр бота — polling остановлен.")
 
     # Очистка webhook
     try:
