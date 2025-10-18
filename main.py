@@ -235,4 +235,30 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import asyncio
+
+    async def main_async():
+        write_log("🚀 Инициализация SaylorWatchBot...")
+        await clear_pending_updates(BOT_TOKEN)
+        await notify_start(BOT_TOKEN, X_CHAT_ID)
+
+        app = Application.builder().token(BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("status", status))
+        app.add_handler(CommandHandler("uptime", uptime))
+        app.add_handler(CommandHandler("help", help_command))
+        app.add_handler(CommandHandler("info", info))
+        app.add_handler(CommandHandler("restart", restart))
+        app.add_handler(CommandHandler("clear", clear))
+
+        bot = Bot(BOT_TOKEN)
+
+        # запуск фоновых задач отдельно
+        asyncio.create_task(ping_alive(bot))
+        asyncio.create_task(start_healthcheck_server())
+        asyncio.create_task(monitor_saylor_purchases(bot))
+
+        write_log("✅ Бот успешно запущен и работает в режиме polling")
+        await app.run_polling(close_loop=False)
+
+    asyncio.run(main_async())
