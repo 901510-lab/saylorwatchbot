@@ -235,12 +235,15 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
+    import asyncio
+
     write_log("🚀 Инициализация SaylorWatchBot...")
 
-    import asyncio
+    # Выполняем асинхронные функции отдельно
     asyncio.run(clear_pending_updates(BOT_TOKEN))
     asyncio.run(notify_start(BOT_TOKEN, X_CHAT_ID))
 
+    # Создаём приложение Telegram
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
@@ -252,11 +255,16 @@ if __name__ == "__main__":
 
     bot = Bot(BOT_TOKEN)
 
+    # 🔧 В Python 3.12 нужно вручную создать event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     # Фоновые задачи
-    loop = asyncio.get_event_loop()
     loop.create_task(ping_alive(bot))
     loop.create_task(start_healthcheck_server())
     loop.create_task(monitor_saylor_purchases(bot))
 
     write_log("✅ Бот успешно запущен и работает в режиме polling")
+
+    # Запуск polling
     app.run_polling()
