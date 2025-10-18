@@ -116,13 +116,17 @@ async def main():
 # ----------------------------------------------------
 if __name__ == "__main__":
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            logger.info("🔁 Существующий event loop уже активен — запускаем внутри него.")
+        try:
+            loop = asyncio.get_running_loop()
+            logger.info("🔁 Обнаружен активный event loop — используем его.")
             loop.create_task(main())
-        else:
+        except RuntimeError:
+            logger.info("🌀 Активный event loop не найден — создаём новый.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(main())
     except Conflict:
         logger.warning("⚠️ Другой экземпляр бота уже запущен — останавливаем этот процесс.")
     except Exception as e:
         logger.error(f"❌ Ошибка при запуске бота: {e}")
+
