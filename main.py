@@ -269,6 +269,25 @@ async def monitor_saylor_purchases(bot: Bot):
 
         await asyncio.sleep(15 * 60)
 
+        # === Post-init: единая точка старта фоновых задач и очистки webhook ===
+async def _post_init(application: Application):
+    # 1) Очистка возможного старого webhook, чтобы избежать Conflict
+    try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        write_log("🧹 Очередь обновлений очищена (drop_pending_updates=True)")
+    except Exception as e:
+        write_log(f"⚠️ Ошибка при очистке webhook: {e}")
+
+    # 2) Уведомление о запуске
+    await notify_start(BOT_TOKEN, X_CHAT_ID)
+
+    # 3) Фоновые задачи (используем application.create_task — корректно в рамках PTB)
+    application.create_task(start_healthcheck_server())
+    application.create_task(monitor_saylor_purchases(application.bot))
+    application.create_task(ping_alive(application.bot))
+
+    write_log("🧩 post_init завершён: фоновые задачи запущены")
+
 # === Команда /site ===
 async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = os.getenv("CHECK_URL", "https://saylortracker.com/")
@@ -277,6 +296,23 @@ async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === Основной запуск ===
 if __name__ == "__main__":
     write_log("🚀 Инициализация SaylorWatchBot...")
+
+    # Создаём приложение и вешаем post_init
+    app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
+
+    # Хендлеры команд (оставляем все твои)
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("uptime", uptime))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("info", info))
+    app.add_handler(CommandHandler("restart", restart))
+    app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(CommandHandler("site", site))
+
+    write_log("✅ Бот успешно запущен и работает в режиме polling")
+    # ВАЖНО: run_polling — синхронная функция, она сама управляет event loop.
+    app.run_polling()
 
     async def main():
         # Очистка старого webhook (предотвращает Conflict)
