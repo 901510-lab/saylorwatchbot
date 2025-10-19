@@ -297,10 +297,19 @@ async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     write_log("🚀 Инициализация SaylorWatchBot...")
 
-    # Создаём приложение и вешаем post_init
-    app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
+    # Настраиваем HTTP-клиент с увеличенным пулом
+    request = HTTPXRequest(connection_pool_size=50, read_timeout=30, write_timeout=30)
 
-    # Хендлеры команд (оставляем все твои)
+    # Создаём приложение и регистрируем post_init
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .request(request)
+        .post_init(_post_init)
+        .build()
+    )
+
+    # Регистрируем все хендлеры
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("uptime", uptime))
@@ -311,38 +320,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("site", site))
 
     write_log("✅ Бот успешно запущен и работает в режиме polling")
-    # ВАЖНО: run_polling — синхронная функция, она сама управляет event loop.
-    app.run_polling()
 
-    async def main():
-        # Очистка старого webhook (предотвращает Conflict)
-        bot = Bot(BOT_TOKEN)
-        try:
-            await bot.delete_webhook(drop_pending_updates=True)
-            write_log("🧹 Очередь обновлений очищена (drop_pending_updates=True)")
-        except Exception as e:
-            write_log(f"⚠️ Ошибка при очистке webhook: {e}")
-
-        # Уведомление о запуске
-        await notify_start(BOT_TOKEN, X_CHAT_ID)
-
-        # Приложение
-        app = Application.builder().token(BOT_TOKEN).build()
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("status", status))
-        app.add_handler(CommandHandler("uptime", uptime))
-        app.add_handler(CommandHandler("help", help_command))
-        app.add_handler(CommandHandler("info", info))
-        app.add_handler(CommandHandler("restart", restart))
-        app.add_handler(CommandHandler("clear", clear))
-        app.add_handler(CommandHandler("site", site))
-
-        # Фоновые задачи
-        asyncio.create_task(ping_alive(bot))
-        asyncio.create_task(start_healthcheck_server())
-        asyncio.create_task(monitor_saylor_purchases(bot))
-
-        write_log("✅ Бот успешно запущен и работает в режиме polling")
-        await app.run_polling(close_loop=False)
-
-    asyncio.run(main())
+    # 🚀 Запуск только одного event loop
+    app.run_polling(close_loop=False)
