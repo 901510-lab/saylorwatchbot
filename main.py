@@ -195,36 +195,53 @@ async def start_healthcheck_server():
     await site.start()
     write_log(f"🌐 Health-check сервер запущен на порту {PORT}")
 
-# === Мониторинг покупок MicroStrategy ===
+# === Мониторинг покупок MicroStrategy (исправленный и устойчивый) ===
 LAST_PURCHASE_FILE = "last_purchase.txt"
+CHECK_URL = os.getenv("CHECK_URL", "https://saylortracker.com/")
 
 async def fetch_latest_purchase():
+    """Парсит таблицу с сайта SaylorTracker и возвращает первую запись"""
     import aiohttp
-    url = "https://saylortracker.com/"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=20) as resp:
-            html = await resp.text()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(CHECK_URL, timeout=20) as resp:
+                if resp.status != 200:
+                    write_log(f"⚠️ Ошибка загрузки ({resp.status}) с {CHECK_URL}")
+                    return None
+                html = await resp.text()
+    except Exception as e:
+        write_log(f"⚠️ Ошибка сети при загрузке сайта: {e}")
+        return None
 
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table")
     if not table:
+        write_log("⚠️ Таблица с покупками не найдена.")
         return None
 
-    first_row = table.find("tr")
-    if not first_row:
+    rows = table.find_all("tr")
+    if len(rows) < 2:
         return None
 
+    # первая строка с данными (пропускаем заголовок)
+    first_row = rows[1]
     cells = [c.get_text(strip=True) for c in first_row.find_all("td")]
     if len(cells) < 4:
+        write_log("⚠️ Недостаточно ячеек в таблице.")
         return None
 
-    return {"date": cells[0], "amount": cells[1], "total": cells[3]}
+    date, amount, price, total = cells[0], cells[1], cells[2], cells[3]
+    return {"date": date, "amount": amount, "price": price, "total": total}
+
 
 async def monitor_saylor_purchases(bot: Bot):
+    """Проверяет покупки MicroStrategy каждые 15 минут"""
     last_date = None
     if os.path.exists(LAST_PURCHASE_FILE):
         with open(LAST_PURCHASE_FILE, "r") as f:
             last_date = f.read().strip()
+
+    write_log(f"🕵️ Запущен мониторинг {CHECK_URL}")
 
     while True:
         try:
@@ -233,21 +250,22 @@ async def monitor_saylor_purchases(bot: Bot):
                 write_log("⚠️ Не удалось получить данные о покупках MicroStrategy.")
             else:
                 if purchase["date"] != last_date:
-                    message = (
-                        f"💰 Новая покупка Bitcoin!\n"
+                    msg = (
+                        f"💰 *MicroStrategy купила Bitcoin!*\n"
                         f"📅 Дата: {purchase['date']}\n"
                         f"₿ Количество: {purchase['amount']}\n"
-                        f"🏦 Сумма: {purchase['total']}"
+                        f"💵 Сумма: {purchase['total']}\n"
+                        f"🌐 Источник: {CHECK_URL}"
                     )
-                    await bot.send_message(chat_id=X_CHAT_ID, text=message)
-                    write_log(message)
+                    await bot.send_message(chat_id=X_CHAT_ID, text=msg, parse_mode="Markdown")
+                    write_log(f"🚨 Новая покупка: {purchase}")
                     last_date = purchase["date"]
                     with open(LAST_PURCHASE_FILE, "w") as f:
                         f.write(last_date)
                 else:
-                    write_log(f"ℹ️ Проверка покупок MicroStrategy — без изменений ({purchase['date']})")
+                    write_log(f"ℹ️ Проверка — без изменений ({purchase['date']})")
         except Exception as e:
-            write_log(f"⚠️ Ошибка мониторинга покупок: {e}")
+            write_log(f"⚠️ Ошибка мониторинга: {e}")
 
         await asyncio.sleep(15 * 60)
 
@@ -258,34 +276,37 @@ async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === Основной запуск ===
 if __name__ == "__main__":
-    import asyncio
-
     write_log("🚀 Инициализация SaylorWatchBot...")
-    asyncio.run(clear_pending_updates(BOT_TOKEN))
-    asyncio.run(notify_start(BOT_TOKEN, X_CHAT_ID))
 
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("uptime", uptime))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("info", info))
-    app.add_handler(CommandHandler("restart", restart))
-    app.add_handler(CommandHandler("clear", clear))
-    app.add_handler(CommandHandler("site", site))
+    async def main():
+        # Очистка старого webhook (предотвращает Conflict)
+        bot = Bot(BOT_TOKEN)
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            write_log("🧹 Очередь обновлений очищена (drop_pending_updates=True)")
+        except Exception as e:
+            write_log(f"⚠️ Ошибка при очистке webhook: {e}")
 
-    bot = Bot(BOT_TOKEN)
+        # Уведомление о запуске
+        await notify_start(BOT_TOKEN, X_CHAT_ID)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.create_task(ping_alive(bot))
-    loop.create_task(start_healthcheck_server())
-    loop.create_task(monitor_saylor_purchases(bot))
+        # Приложение
+        app = Application.builder().token(BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("status", status))
+        app.add_handler(CommandHandler("uptime", uptime))
+        app.add_handler(CommandHandler("help", help_command))
+        app.add_handler(CommandHandler("info", info))
+        app.add_handler(CommandHandler("restart", restart))
+        app.add_handler(CommandHandler("clear", clear))
+        app.add_handler(CommandHandler("site", site))
 
-    write_log("✅ Бот успешно запущен и работает в режиме polling")
-    # Добавим небольшую задержку, чтобы Telegram сбросил старый polling
-    loop.run_until_complete(asyncio.sleep(5))
-    try:
-        app.run_polling()
-    except Exception as e:
-        write_log(f"⚠️ Ошибка запуска polling: {e}")
+        # Фоновые задачи
+        asyncio.create_task(ping_alive(bot))
+        asyncio.create_task(start_healthcheck_server())
+        asyncio.create_task(monitor_saylor_purchases(bot))
+
+        write_log("✅ Бот успешно запущен и работает в режиме polling")
+        await app.run_polling(close_loop=False)
+
+    asyncio.run(main())
