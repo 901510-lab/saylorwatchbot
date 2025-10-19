@@ -289,9 +289,85 @@ async def _post_init(application: Application):
     write_log("🧩 post_init завершён: фоновые задачи запущены")
 
 # === Команда /site ===
-async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = os.getenv("CHECK_URL", "https://saylortracker.com/")
-    await update.message.reply_text(f"🌐 Текущий сайт для мониторинга:\n{url}")
+
+# === Команда /monitor ===
+async def monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает, что именно мониторит бот (на трёх языках, с балансом и последней покупкой)"""
+    url = os.getenv("CHECK_URL", "https://saylortracker.com/?tab=charts")
+    interval_minutes = 15
+
+    # Загружаем последнюю покупку, если файл существует
+    last_date = "ещё не обнаружено / not yet detected / pas encore détecté"
+    last_amount = "—"
+    last_total = "—"
+    balance_btc = "—"
+    balance_usd = "—"
+
+    if os.path.exists(LAST_PURCHASE_FILE):
+        try:
+            with open(LAST_PURCHASE_FILE, "r") as f:
+                last_date = f.read().strip()
+        except Exception:
+            pass
+
+    # Попробуем получить актуальные данные с сайта
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=15) as resp:
+                html = await resp.text()
+                soup = BeautifulSoup(html, "html.parser")
+
+                # --- таблица покупок ---
+                table = soup.find("table")
+                if table:
+                    first_row = table.find_all("tr")[1]
+                    cells = [c.get_text(strip=True) for c in first_row.find_all("td")]
+                    if len(cells) >= 4:
+                        last_date, last_amount, _, last_total = cells[0], cells[1], cells[2], cells[3]
+
+                # --- общие балансы ---
+                summary = soup.find("div", class_="text-center")
+                if summary:
+                    text = summary.get_text()
+                    if "BTC" in text:
+                        import re
+                        btc_match = re.search(r"([\d,]+)\s*BTC", text)
+                        usd_match = re.search(r"\$([\d,.]+)", text)
+                        if btc_match:
+                            balance_btc = btc_match.group(1).replace(",", "")
+                        if usd_match:
+                            balance_usd = usd_match.group(1)
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка при парсинге сайта в /monitor: {e}")
+
+    message = (
+        "📡 *Мониторинг активен*\n"
+        f"🌐 Сайт: {url}\n"
+        f"⏱ Интервал проверки: каждые {interval_minutes} минут\n"
+        f"📅 Последняя зафиксированная покупка: {last_date}\n"
+        f"₿ Количество: {last_amount}\n"
+        f"💵 Сумма покупки: {last_total}\n"
+        f"🏦 Баланс MicroStrategy: {balance_btc} BTC (~${balance_usd})\n\n"
+        "———\n"
+        "📡 *Monitoring active*\n"
+        f"🌐 Website: {url}\n"
+        f"⏱ Check interval: every {interval_minutes} minutes\n"
+        f"📅 Last detected purchase: {last_date}\n"
+        f"₿ Amount: {last_amount}\n"
+        f"💵 Purchase total: {last_total}\n"
+        f"🏦 MicroStrategy holdings: {balance_btc} BTC (~${balance_usd})\n\n"
+        "———\n"
+        "📡 *Surveillance active*\n"
+        f"🌐 Site : {url}\n"
+        f"⏱ Intervalle de vérification : toutes les {interval_minutes} minutes\n"
+        f"📅 Dernier achat détecté : {last_date}\n"
+        f"₿ Quantité : {last_amount}\n"
+        f"💵 Montant de l'achat : {last_total}\n"
+        f"🏦 Réserve de MicroStrategy : {balance_btc} BTC (~${balance_usd})"
+    )
+
+    await update.message.reply_text(message, parse_mode="Markdown")
 
 # === Основной запуск ===
 if __name__ == "__main__":
@@ -318,8 +394,16 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
+    app.add_handler(CommandHandler("monitor", monitor))
 
     write_log("✅ Бот успешно запущен и работает в режиме polling")
+
+# Очистка старого webhook до запуска polling
+try:
+    Bot(BOT_TOKEN).delete_webhook(drop_pending_updates=True)
+    write_log("🧹 Webhook очищен перед запуском polling")
+except Exception as e:
+    write_log(f"⚠️ Ошибка при очистке webhook перед запуском: {e}")
 
     # 🚀 Запуск только одного event loop
     app.run_polling(close_loop=False)
