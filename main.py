@@ -125,9 +125,20 @@ async def clear_pending_updates(token):
     except Exception as e:
         write_log(f"⚠️ Ошибка при очистке webhook: {e}")
 
-        # === Команда /clear ===
+    # === Команда /status ===
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uptime = datetime.datetime.now() - start_time
+    msg = (
+        f"✅ *Бот онлайн*\n"
+        f"⏱ Аптайм: {uptime}\n"
+        f"📅 Время сервера: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+# === Команда /clear ===
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Удаляет последние сообщения бота"""
+    """Удаляет последние сообщения бота (без get_updates)"""
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Доступ запрещён.")
         return
@@ -137,6 +148,20 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deleted = 0
 
     try:
+        async for message in bot.get_chat_history(chat_id, limit=50):
+            if message.from_user and message.from_user.is_bot:
+                try:
+                    await bot.delete_message(chat_id, message.message_id)
+                    deleted += 1
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Ошибка при очистке: {e}")
+        return
+
+    await update.message.reply_text(f"🧹 Удалено сообщений бота: {deleted}")
+
         # Ограничим число апдейтов до 30 (вместо 100)
         updates = await bot.get_updates(limit=30)
 
@@ -289,6 +314,12 @@ async def _post_init(application: Application):
     write_log("🧩 post_init завершён: фоновые задачи запущены")
 
 # === Команда /site ===
+
+async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = os.getenv("CHECK_URL", "https://saylortracker.com/?tab=charts")
+    await update.message.reply_text(
+        f"🌐 Текущий сайт для мониторинга:\n{url}"
+    )
 
 # === Команда /monitor ===
 async def monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
