@@ -71,9 +71,9 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Перезапуск Render-инстанса...")
     os._exit(0)
 
-# === Команда /clear (работает корректно при polling) ===
+# === Команда /clear (работает в polling и Render) ===
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Удаляет последние сообщения бота в текущем чате"""
+    """Удаляет последние сообщения, отправленные ботом"""
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Доступ запрещён.")
         return
@@ -83,16 +83,17 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deleted = 0
 
     try:
-        # Получаем историю чата (последние 100 сообщений)
-        async for msg in bot.get_chat_history(chat_id, limit=100):
-            if msg.from_user and msg.from_user.is_bot:
-                try:
-                    await bot.delete_message(chat_id, msg.message_id)
-                    deleted += 1
-                    await asyncio.sleep(0.15)
-                except Exception:
-                    pass
-        await update.message.reply_text(f"🧹 Удалено сообщений бота: {deleted}")
+        # Определим диапазон последних message_id (до 50 назад)
+        current_msg_id = update.message.message_id
+        for msg_id in range(current_msg_id - 50, current_msg_id):
+            try:
+                await bot.delete_message(chat_id, msg_id)
+                deleted += 1
+                await asyncio.sleep(0.1)
+            except Exception:
+                pass  # пропускаем, если сообщение уже удалено или не принадлежит боту
+
+        await update.message.reply_text(f"🧹 Удалено сообщений: {deleted}")
     except Exception as e:
         await update.message.reply_text(
             f"⚠️ Ошибка при очистке: {e}\n"
