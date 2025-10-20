@@ -214,20 +214,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
 
-    # === Безопасная асинхронная очистка webhook ===
-    import asyncio
-    from telegram import Bot
-
-    async def safe_clear_webhook():
-        try:
-            bot = Bot(BOT_TOKEN)
-            await bot.delete_webhook(drop_pending_updates=True)
-            write_log("🧹 Webhook очищен перед запуском polling")
-        except Exception as e:
-            write_log(f"⚠️ Не удалось очистить webhook перед запуском: {e}")
-
-    asyncio.run(safe_clear_webhook())
-
-    # ✅ Запуск polling после очистки
     write_log("✅ Бот запущен в режиме polling")
     app.run_polling(close_loop=False)
