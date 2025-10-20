@@ -215,5 +215,20 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
 
+    # 🔧 Принудительная очистка любых активных polling-сессий
+    import asyncio
+    from telegram import Bot
+
+    async def force_clear_conflicts():
+        try:
+            bot = Bot(BOT_TOKEN)
+            await bot.delete_webhook(drop_pending_updates=True)
+            await asyncio.sleep(1)
+            print("🧹 Telegram webhook и polling-сессии очищены.")
+        except Exception as e:
+            print(f"⚠️ Не удалось очистить polling-сессии: {e}")
+
+    asyncio.run(force_clear_conflicts())
+
     write_log("✅ Бот запущен в режиме polling")
-    app.run_polling(close_loop=False)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
