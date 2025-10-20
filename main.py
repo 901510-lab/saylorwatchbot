@@ -71,30 +71,33 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Перезапуск Render-инстанса...")
     os._exit(0)
 
-# === Очистка сообщений ===
+# === Команда /clear (работает корректно при polling) ===
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет последние сообщения бота в текущем чате"""
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Доступ запрещён.")
         return
 
-    chat_id = update.message.chat_id
+    chat_id = update.effective_chat.id
     bot = context.bot
     deleted = 0
-    try:
-        updates = await bot.get_updates(limit=30)
-        for upd in updates:
-            if upd.message and upd.message.from_user and upd.message.from_user.is_bot:
-                try:
-                    await bot.delete_message(chat_id, upd.message.message_id)
-                    deleted += 1
-                    await asyncio.sleep(0.5)
-                except Exception as e:
-                    logger.warning(f"Не удалось удалить сообщение: {e}")
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Ошибка при удалении: {e}")
-        return
 
-    await update.message.reply_text(f"🧹 Удалено сообщений бота: {deleted}")
+    try:
+        # Получаем историю чата (последние 100 сообщений)
+        async for msg in bot.get_chat_history(chat_id, limit=100):
+            if msg.from_user and msg.from_user.is_bot:
+                try:
+                    await bot.delete_message(chat_id, msg.message_id)
+                    deleted += 1
+                    await asyncio.sleep(0.15)
+                except Exception:
+                    pass
+        await update.message.reply_text(f"🧹 Удалено сообщений бота: {deleted}")
+    except Exception as e:
+        await update.message.reply_text(
+            f"⚠️ Ошибка при очистке: {e}\n"
+            "Совет: попробуй ещё раз через 10–15 секунд."
+        )
 
 # === Health-check ===
 async def handle(request):
