@@ -182,13 +182,17 @@ async def ping_alive(bot: Bot):
 # === Post-init ===
 async def _post_init(application: Application):
     try:
+        # 🔧 Принудительная очистка webhook и любых polling-сессий
         await application.bot.delete_webhook(drop_pending_updates=True)
-        write_log("🧹 Очередь обновлений очищена")
+        write_log("🧹 Telegram webhook и polling-сессии очищены (post_init)")
     except Exception as e:
-        write_log(f"⚠️ Ошибка webhook: {e}")
+        write_log(f"⚠️ Ошибка при очистке polling-сессий: {e}")
+
+    # 🔁 Запуск фоновых задач
     application.create_task(start_healthcheck_server())
     application.create_task(monitor_saylor_purchases(application.bot))
     application.create_task(ping_alive(application.bot))
+
     write_log("🧩 post_init завершён")
 
 # === Команда /site ===
@@ -215,20 +219,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
 
-    # 🔧 Принудительная очистка любых активных polling-сессий
-    import asyncio
-    from telegram import Bot
-
-    async def force_clear_conflicts():
-        try:
-            bot = Bot(BOT_TOKEN)
-            await bot.delete_webhook(drop_pending_updates=True)
-            await asyncio.sleep(1)
-            print("🧹 Telegram webhook и polling-сессии очищены.")
-        except Exception as e:
-            print(f"⚠️ Не удалось очистить polling-сессии: {e}")
-
-    asyncio.run(force_clear_conflicts())
-
     write_log("✅ Бот запущен в режиме polling")
-    app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
