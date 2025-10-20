@@ -209,5 +209,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
+    asyncio.run(Bot(BOT_TOKEN).delete_webhook(drop_pending_updates=True))
     write_log("✅ Бот запущен в режиме polling")
     app.run_polling(close_loop=False)
