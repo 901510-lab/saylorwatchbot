@@ -28,27 +28,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет! Бот активен и работает 24/7 🚀")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import aiohttp
+
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Бот онлайн\n⏱ Аптайм: {uptime}\n"
 
     # Проверяем последний зафиксированный результат
-    last_info = "❌ Нет данных о покупках."
+    last_info = "📊 Данных о последних покупках пока нет (бот ждёт обновления сайта)."
     if os.path.exists(LAST_PURCHASE_FILE):
         with open(LAST_PURCHASE_FILE, "r") as f:
             last_date = f.read().strip()
             if last_date:
                 last_info = f"📅 Последняя покупка: {last_date}"
-    else:
-        last_info = "ℹ️ Файл данных ещё не создан."
 
-    # Проверяем сайт — работает ли
-    import aiohttp
+    # Проверяем сайт и баланс BTC
     site_status = "❌ Ошибка подключения"
+    btc_balance_info = "⚠️ Баланс не получен"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(CHECK_URL, timeout=10) as resp:
                 if resp.status == 200:
                     site_status = "✅ Сайт доступен и работает"
+                    html = await resp.text()
+
+                    # Парсим HTML и ищем строку с балансом BTC
+                    soup = BeautifulSoup(html, "html.parser")
+                    text = soup.get_text(" ", strip=True)
+                    if "Total Bitcoin Holdings" in text:
+                        import re
+                        match = re.search(r"Total Bitcoin Holdings.*?([\d,]+)\s*BTC.*?\$([\d,\.]+)", text)
+                        if match:
+                            btc = match.group(1).replace(",", "")
+                            usd = match.group(2)
+                            btc_balance_info = f"💰 Баланс MicroStrategy: {btc} BTC (~${usd})"
+                        else:
+                            btc_balance_info = "ℹ️ Не удалось извлечь баланс BTC"
                 else:
                     site_status = f"⚠️ Ответ сайта: {resp.status}"
     except Exception as e:
@@ -57,6 +71,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
+        f"{btc_balance_info}\n"
         f"{site_status}\n"
         f"🌐 Мониторинг: {CHECK_URL}"
     )
