@@ -54,26 +54,30 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Ошибка: {type(e).__name__}"
 
-    # Получаем баланс MicroStrategy через API bitcointreasuries.net
+    # Получаем баланс MicroStrategy через bitcointreasuries.net
     btc_balance_info = "⚠️ Не удалось получить баланс BTC"
     try:
-        api_url = "https://bitcointreasuries.net/api/companies"
+        api_url = "https://bitcointreasuries.net/api/v2/companies"
         async with aiohttp.ClientSession() as session:
             async with session.get(api_url, timeout=15) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    for company in data.get("companies", []):
-                        if "MicroStrategy" in company.get("name", ""):
-                            btc = company.get("bitcoin", "0")
-                            usd = company.get("usd_value", "0")
-                            btc_balance_info = f"💰 Баланс MicroStrategy: {btc} BTC (~${usd})"
+                    for c in data:
+                        if "MicroStrategy" in c.get("name", ""):
+                            btc = c.get("bitcoin", "0")
+                            usd = c.get("usd_value", "0")
+                            price = c.get("btc_price", "0")
+                            btc_balance_info = (
+                                f"💰 Баланс MicroStrategy: {btc} BTC (~${usd})\n"
+                                f"📈 Средняя цена покупки: ${price}"
+                            )
                             break
                 else:
                     btc_balance_info = f"⚠️ API ответ: {resp.status}"
     except Exception as e:
         btc_balance_info = f"⚠️ Ошибка при получении баланса: {type(e).__name__}"
 
-    # Формируем итоговое сообщение
+    # Итоговое сообщение
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
