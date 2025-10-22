@@ -29,7 +29,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
-    await update.message.reply_text(f"✅ Бот онлайн\n⏱ Аптайм: {uptime}")
+    status_msg = f"✅ Бот онлайн\n⏱ Аптайм: {uptime}\n"
+
+    # Проверяем последний зафиксированный результат
+    last_info = "❌ Нет данных о покупках."
+    if os.path.exists(LAST_PURCHASE_FILE):
+        with open(LAST_PURCHASE_FILE, "r") as f:
+            last_date = f.read().strip()
+            if last_date:
+                last_info = f"📅 Последняя покупка: {last_date}"
+    else:
+        last_info = "ℹ️ Файл данных ещё не создан."
+
+    # Проверяем сайт — работает ли
+    import aiohttp
+    site_status = "❌ Ошибка подключения"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(CHECK_URL, timeout=10) as resp:
+                if resp.status == 200:
+                    site_status = "✅ Сайт доступен и работает"
+                else:
+                    site_status = f"⚠️ Ответ сайта: {resp.status}"
+    except Exception as e:
+        site_status = f"⚠️ Ошибка: {type(e).__name__}"
+
+    msg = (
+        f"{status_msg}\n"
+        f"{last_info}\n"
+        f"{site_status}\n"
+        f"🌐 Мониторинг: {CHECK_URL}"
+    )
+
+    await update.message.reply_text(msg)
 
 async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
