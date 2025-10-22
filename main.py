@@ -29,6 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import aiohttp
+    import re
 
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Бот онлайн\n⏱ Аптайм: {uptime}\n"
@@ -41,28 +42,26 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if last_date:
                 last_info = f"📅 Последняя покупка: {last_date}"
 
-    # Проверяем сайт и баланс BTC
+    # Проверяем сайт и ищем баланс BTC
     site_status = "❌ Ошибка подключения"
     btc_balance_info = "⚠️ Баланс не получен"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(CHECK_URL, timeout=10) as resp:
+            async with session.get(CHECK_URL, timeout=15) as resp:
                 if resp.status == 200:
                     site_status = "✅ Сайт доступен и работает"
                     html = await resp.text()
-
-                    # Парсим HTML и ищем строку с балансом BTC
                     soup = BeautifulSoup(html, "html.parser")
                     text = soup.get_text(" ", strip=True)
-                    if "Total Bitcoin Holdings" in text:
-                        import re
-                        match = re.search(r"Total Bitcoin Holdings.*?([\d,]+)\s*BTC.*?\$([\d,\.]+)", text)
-                        if match:
-                            btc = match.group(1).replace(",", "")
-                            usd = match.group(2)
-                            btc_balance_info = f"💰 Баланс MicroStrategy: {btc} BTC (~${usd})"
-                        else:
-                            btc_balance_info = "ℹ️ Не удалось извлечь баланс BTC"
+
+                    # Новый шаблон: ищем число с BTC и число с $
+                    match = re.search(r"([\d,]+)\s*BTC.*?\$([\d,\.]+[MB]?)", text)
+                    if match:
+                        btc = match.group(1).replace(",", "")
+                        usd = match.group(2)
+                        btc_balance_info = f"💰 Баланс MicroStrategy: {btc} BTC (~${usd})"
+                    else:
+                        btc_balance_info = "ℹ️ Не удалось извлечь баланс BTC"
                 else:
                     site_status = f"⚠️ Ответ сайта: {resp.status}"
     except Exception as e:
