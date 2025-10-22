@@ -29,7 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import aiohttp
-    import re
+    import datetime
 
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Бот онлайн\n⏱ Аптайм: {uptime}\n"
@@ -42,31 +42,38 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if last_date:
                 last_info = f"📅 Последняя покупка: {last_date}"
 
-    # Проверяем сайт и ищем баланс BTC
+    # Проверяем сайт доступности
     site_status = "❌ Ошибка подключения"
-    btc_balance_info = "⚠️ Баланс не получен"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(CHECK_URL, timeout=15) as resp:
+            async with session.get(CHECK_URL, timeout=10) as resp:
                 if resp.status == 200:
                     site_status = "✅ Сайт доступен и работает"
-                    html = await resp.text()
-                    soup = BeautifulSoup(html, "html.parser")
-                    text = soup.get_text(" ", strip=True)
-
-                    # Новый шаблон: ищем число с BTC и число с $
-                    match = re.search(r"([\d,]+)\s*BTC.*?\$([\d,\.]+[MB]?)", text)
-                    if match:
-                        btc = match.group(1).replace(",", "")
-                        usd = match.group(2)
-                        btc_balance_info = f"💰 Баланс MicroStrategy: {btc} BTC (~${usd})"
-                    else:
-                        btc_balance_info = "ℹ️ Не удалось извлечь баланс BTC"
                 else:
                     site_status = f"⚠️ Ответ сайта: {resp.status}"
     except Exception as e:
         site_status = f"⚠️ Ошибка: {type(e).__name__}"
 
+    # Получаем баланс MicroStrategy через API bitcointreasuries.net
+    btc_balance_info = "⚠️ Не удалось получить баланс BTC"
+    try:
+        api_url = "https://bitcointreasuries.net/api/companies"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for company in data.get("companies", []):
+                        if "MicroStrategy" in company.get("name", ""):
+                            btc = company.get("bitcoin", "0")
+                            usd = company.get("usd_value", "0")
+                            btc_balance_info = f"💰 Баланс MicroStrategy: {btc} BTC (~${usd})"
+                            break
+                else:
+                    btc_balance_info = f"⚠️ API ответ: {resp.status}"
+    except Exception as e:
+        btc_balance_info = f"⚠️ Ошибка при получении баланса: {type(e).__name__}"
+
+    # Формируем итоговое сообщение
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
