@@ -77,11 +77,31 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         btc_balance_info = f"⚠️ Ошибка при получении баланса: {type(e).__name__}"
 
+    # === Общее количество купленных BTC с SaylorTracker ===
+    total_btc_info = "⚠️ Не удалось получить данные о покупках"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(CHECK_URL, timeout=15) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    soup = BeautifulSoup(html, "html.parser")
+                    total_elem = soup.find("strong", string=lambda s: s and "Total" in s)
+                    if total_elem:
+                        total_text = total_elem.find_next("td").get_text(strip=True)
+                        total_btc_info = f"📊 Всего куплено BTC: {total_text}"
+                    else:
+                        total_btc_info = "⚠️ Не удалось найти итоговую строку на сайте"
+                else:
+                    total_btc_info = f"⚠️ Ошибка загрузки сайта ({resp.status})"
+    except Exception as e:
+        total_btc_info = f"⚠️ Ошибка при обработке данных: {type(e).__name__}"
+
     # Итоговое сообщение
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
         f"{btc_balance_info}\n"
+        f"{total_btc_info}\n"
         f"{site_status}\n"
         f"🌐 Мониторинг: {CHECK_URL}"
     )
