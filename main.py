@@ -176,16 +176,25 @@ CHECK_URL = os.getenv("CHECK_URL", "https://saylortracker.com/")
 
 async def fetch_latest_purchase():
     import aiohttp
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0 Safari/537.36"
+        )
+    }
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(CHECK_URL, timeout=20) as resp:
                 if resp.status != 200:
+                    write_log(f"⚠️ API ответ: {resp.status}")
                     return None
                 html = await resp.text()
     except Exception as e:
         write_log(f"⚠️ Ошибка сети: {e}")
         return None
 
+    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table")
     if not table:
