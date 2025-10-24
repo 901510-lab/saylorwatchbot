@@ -43,16 +43,36 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 last_info = f"📅 Последняя покупка: {last_date}"
 
     # Проверяем сайт доступности
-    site_status = "❌ Ошибка подключения"
+site_status = "❌ Ошибка подключения"
+try:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(CHECK_URL, timeout=10) as resp:
+            if resp.status == 200:
+                site_status = "✅ Сайт доступен и работает"
+            else:
+                site_status = f"⚠️ Ответ сайта: {resp.status}"
+except Exception as e:
+    site_status = f"⚠️ Ошибка: {type(e).__name__}"
+
+        # === Общее количество купленных BTC с SaylorTracker ===
+    total_btc_info = "⚠️ Не удалось получить данные о покупках"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(CHECK_URL, timeout=10) as resp:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get("https://saylortracker.com/", timeout=15) as resp:
                 if resp.status == 200:
-                    site_status = "✅ Сайт доступен и работает"
+                    html = await resp.text()
+                    soup = BeautifulSoup(html, "html.parser")
+                    total_elem = soup.find("strong", string=lambda s: s and "Total" in s)
+                    if total_elem:
+                        total_text = total_elem.find_next("td").get_text(strip=True)
+                        total_btc_info = f"📊 Всего куплено BTC: {total_text}"
+                    else:
+                        total_btc_info = "⚠️ Не удалось найти итоговую строку на сайте"
                 else:
-                    site_status = f"⚠️ Ответ сайта: {resp.status}"
+                    total_btc_info = f"⚠️ Ошибка загрузки сайта ({resp.status})"
     except Exception as e:
-        site_status = f"⚠️ Ошибка: {type(e).__name__}"
+        total_btc_info = f"⚠️ Ошибка при обработке данных: {type(e).__name__}"
 
     # Получаем баланс MicroStrategy через bitcointreasuries.net
     btc_balance_info = "⚠️ Не удалось получить баланс BTC"
