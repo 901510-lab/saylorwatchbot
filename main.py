@@ -276,28 +276,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
 
-# === Запуск через webhook (Render-friendly) ===
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # например, https://saylorwatchbot.onrender.com
-
-async def main():
-    await _post_init(app)  # запустить фоновые задачи и healthcheck
-    await app.bot.delete_webhook(drop_pending_updates=True)
-    await app.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-
-    # Создаём aiohttp сервер для приёма обновлений от Telegram
-    web_app = web.Application()
-    web_app.router.add_post("/webhook", app.webhook_handler)
-    web_app.router.add_get("/", handle)  # healthcheck endpoint
-
-    write_log(f"✅ Webhook активен: {WEBHOOK_URL}/webhook")
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
-
-    # Оставляем бота активным
-    while True:
-        await asyncio.sleep(3600)
-
 if __name__ == "__main__":
     asyncio.run(main())
