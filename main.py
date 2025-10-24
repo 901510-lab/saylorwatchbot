@@ -277,4 +277,4 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("site", site))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_polling())
