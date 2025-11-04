@@ -32,31 +32,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
 
-    # --- Last purchase check (CoinGecko only, reliable) ---
-    last_info = "📊 No recent purchase detected yet (waiting for update)."
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(
-                "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as r:
-                if r.status == 200:
-                    data = await r.json()
-                    for c in data.get("companies", []):
-                        if "MicroStrategy" in c.get("name", ""):
-                            holdings = float(c.get("total_holdings", 0))
-                            usd_value = c.get("total_current_value_usd", "0")
-                            last_info = f"💰 MicroStrategy holds {holdings} BTC (~${usd_value})"
-                            with open("last_purchase.txt", "w") as f:
-                                f.write(str(holdings))
-                            break
-                else:
-                    last_info = f"⚠️ CoinGecko API response: {r.status}"
-    except Exception as e:
-        last_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
-
-    # --- MicroStrategy BTC balance (via CoinGecko only, simplified) ---
+    # --- Get MicroStrategy BTC balance via CoinGecko ---
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
+    last_info = "📊 No recent purchase detected yet (waiting for update)."
+
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(
@@ -69,17 +48,22 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if "MicroStrategy" in c.get("name", ""):
                             btc = float(c.get("total_holdings", 0))
                             usd = c.get("total_current_value_usd", "0")
+                            avg_price = c.get("total_entry_value_usd", "0")
                             btc_balance_info = (
                                 f"🏢 MicroStrategy — Bitcoin Holdings\n"
-                                f"💰 {btc} BTC (~${usd}) [via CoinGecko]"
+                                f"💰 {btc} BTC (~${usd})\n"
+                                f"📈 Entry value: ${avg_price}\n"
+                                f"🟢 Data via CoinGecko"
                             )
+                            last_info = f"📅 Latest data updated successfully."
+                            with open("last_purchase.txt", "w") as f:
+                                f.write(str(btc))
                             break
                 else:
                     btc_balance_info = f"⚠️ CoinGecko API response: {r.status}"
     except Exception as e:
         btc_balance_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
 
-    # --- Final message ---
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
