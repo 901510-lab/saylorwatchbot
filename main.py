@@ -12,10 +12,32 @@ import json
 
 # === Initialization ===
 load_dotenv()
+
+# --- Safety check for environment variables ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 X_CHAT_ID = os.getenv("X_CHAT_ID")
-PORT = int(os.environ.get("PORT", 10000))
+CHECK_URL = os.getenv("CHECK_URL", "https://saylortracker.com/")
+PORT_ENV = os.getenv("PORT")
 
+try:
+    PORT = int(PORT_ENV) if PORT_ENV else 10000
+except ValueError:
+    print(f"⚠️ Invalid PORT value: {PORT_ENV}, using default 10000")
+    PORT = 10000
+
+if not BOT_TOKEN or len(BOT_TOKEN) < 40:
+    print("❌ BOT_TOKEN missing or invalid! Check Environment Variables on Render.")
+    exit(1)
+
+if not X_CHAT_ID or not X_CHAT_ID.isdigit():
+    print("❌ X_CHAT_ID missing or invalid! Check Environment Variables on Render.")
+    exit(1)
+
+print(f"✅ Environment loaded successfully.")
+print(f"🌐 CHECK_URL = {CHECK_URL}")
+print(f"🧠 CHAT_ID = {X_CHAT_ID}")
+
+# --- Logging ---
 logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 start_time = datetime.datetime.now()
@@ -31,11 +53,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === /status COMMAND WITH MULTI-SOURCE FALLBACK ===
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import aiohttp
-
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
 
-    # === 1️⃣ Last purchase check ===
+    # --- Last purchase check ---
     last_info = "📊 No recent purchase detected yet (waiting for update)."
     if os.path.exists("last_purchase.txt"):
         with open("last_purchase.txt", "r") as f:
@@ -43,19 +64,20 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if last_date:
                 last_info = f"📅 Last recorded purchase: {last_date}"
 
-    # === 2️⃣ Site availability ===
+    # --- Website availability ---
     site_status = "❌ Connection error"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(CHECK_URL, timeout=10) as resp:
-                if resp.status == 200:
-                    site_status = "✅ Website is reachable"
-                else:
-                    site_status = f"⚠️ Website response: {resp.status}"
+                site_status = (
+                    "✅ Website is reachable"
+                    if resp.status == 200
+                    else f"⚠️ Website response: {resp.status}"
+                )
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-    # === 3️⃣ MicroStrategy BTC balance (4-level fallback chain) ===
+    # --- MicroStrategy BTC balance ---
     cache_file = "mstr_balance_cache.json"
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     cache_valid = False
@@ -203,7 +225,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 write_log(f"⚠️ BitcoinTreasuries attempt {attempt+1} error: {e}")
 
-    # === Combine & send ===
+    # --- Final report ---
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
@@ -215,6 +237,5 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg)
 
-# === Other Commands, Healthcheck, Monitor, etc. (без изменений) ===
-# (оставлены те же функции uptime, help_command, info, restart, clear, handle, start_healthcheck_server,
-#  fetch_latest_purchase, monitor_saylor_purchases, ping_alive, _post_init, site, main block)
+# === Rest of the bot logic (uptime, help, info, restart, clear, healthcheck, monitor...) remains same ===
+# (Не изменялось — вставь этот блок на место старого main.py)
