@@ -27,22 +27,24 @@ def write_log(msg: str):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Hello! Bot is active and running 24/7 🚀")
 
+# === FIXED /status COMMAND ===
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import aiohttp
     import datetime
+    import json
 
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
 
-    # Last purchase check
+    # === 1️⃣ Last purchase check ===
     last_info = "📊 No recent purchase detected yet (waiting for update)."
-    if os.path.exists(LAST_PURCHASE_FILE):
-        with open(LAST_PURCHASE_FILE, "r") as f:
+    if os.path.exists("last_purchase.txt"):
+        with open("last_purchase.txt", "r") as f:
             last_date = f.read().strip()
             if last_date:
                 last_info = f"📅 Last recorded purchase: {last_date}"
 
-    # Site availability
+    # === 2️⃣ Check site availability ===
     site_status = "❌ Connection error"
     try:
         async with aiohttp.ClientSession() as session:
@@ -54,55 +56,31 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-           # Get MicroStrategy BTC balance using CoinGecko API
+    # === 3️⃣ Get MicroStrategy BTC balance from CoinGecko ===
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin") as resp:
+            url = "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin"
+            async with session.get(url, timeout=10) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     for c in data.get("companies", []):
                         if "MicroStrategy" in c.get("name", ""):
                             btc = c.get("total_holdings", "0")
                             usd = c.get("total_current_value_usd", "0")
-                            price = c.get("total_entry_value_usd", "0")
+                            entry = c.get("total_entry_value_usd", "0")
                             btc_balance_info = (
                                 f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                                f"📈 Entry value: ${price}"
+                                f"📈 Entry value: ${entry}"
                             )
                             break
                 else:
                     btc_balance_info = f"⚠️ API response: {resp.status}"
     except Exception as e:
-        btc_balance_info = f"⚠️ Error fetching balance: {type(e).__name__}"
+        write_log(f"⚠️ Error fetching CoinGecko data: {e}")
+        btc_balance_info = f"⚠️ API error: {type(e).__name__}"
 
-            # If primary failed, fallback
-    except Exception:
-        try:
-            fallback_url = (
-                "https://raw.githubusercontent.com/coinforensics/"
-                "bitcointreasuries/master/data/companies.json"
-            )
-            async with aiohttp.ClientSession() as fb_session:
-                async with fb_session.get(fallback_url, timeout=15) as fb_resp:
-                    fb_text = await fb_resp.text()
-                    data = json.loads(fb_text)
-        except Exception as e:
-            btc_balance_info = f"⚠️ Could not load data from any source ({type(e).__name__})"
-            data = []
-
-    # Extract MicroStrategy info if data loaded
-    for c in data:
-        if "MicroStrategy" in c.get("name", ""):
-            btc = c.get("bitcoin", "0")
-            usd = c.get("usd_value", "0")
-            price = c.get("btc_price", "0")
-            btc_balance_info = (
-                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                f"📈 Average buy price: ${price}"
-            )
-            break
-
+    # === 4️⃣ Combine and send ===
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
@@ -113,6 +91,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg)
 
+# === Other Commands ===
 async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     await update.message.reply_text(f"⏱ Uptime: {uptime}")
