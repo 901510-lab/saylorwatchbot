@@ -67,12 +67,11 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.get(
-                    "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/docs/companies.json",
+                    "https://raw.githubusercontent.com/bitcointreasuries/bitcointreasuries.github.io/master/_data/companies.json",
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as r2:
                     if r2.status == 200:
                         data2 = await r2.json()
-                        # GitHub JSON — это список, а не объект
                         for c in data2:
                             if "MicroStrategy" in c.get("name", ""):
                                 btc = c.get("bitcoin", "0")
@@ -186,7 +185,7 @@ async def start_healthcheck_server():
 
 # === Monitoring ===
 LAST_PURCHASE_FILE = "last_purchase.txt"
-CHECK_URL = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/docs/companies.json"
+CHECK_URL = "https://raw.githubusercontent.com/bitcointreasuries/bitcointreasuries.github.io/master/_data/companies.json"
 
 
 async def fetch_latest_purchase():
