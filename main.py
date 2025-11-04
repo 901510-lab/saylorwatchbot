@@ -176,6 +176,10 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        loop = asyncio.get_event_loop()
+        loop.create_task(main())
+        loop.run_forever()
+    except KeyboardInterrupt:
+        print("🛑 Bot stopped manually.")
     except Exception as e:
         print(f"❌ Startup error: {e}")
