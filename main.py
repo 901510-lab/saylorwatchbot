@@ -274,13 +274,19 @@ async def main():
     # Polling
     await app.run_polling(close_loop=False, allowed_updates=Update.ALL_TYPES)
 
-# ==== Render-safe launcher ====
+# === Proper launcher for Render ===
 if __name__ == "__main__":
+    import asyncio
+
+    async def runner():
+        try:
+            await main()
+        except Exception as e:
+            print(f"❌ Startup error inside runner: {e}")
+            raise
+
+    # Создаём новый event loop вручную — безопасно для Python 3.12
     try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(main())
-        loop.run_forever()
+        asyncio.run(runner())
     except KeyboardInterrupt:
         print("🛑 Bot stopped manually.")
-    except Exception as e:
-        print(f"❌ Startup error: {e}")
