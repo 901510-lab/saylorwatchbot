@@ -72,16 +72,19 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ) as r2:
                     if r2.status == 200:
                         data2 = await r2.json()
-                        for c in data2.get("companies", []):
+                        # GitHub JSON — это список, а не объект
+                        for c in data2:
                             if "MicroStrategy" in c.get("name", ""):
-                                btc = float(c.get("total_holdings", 0))
-                                usd = c.get("total_current_value_usd", "0")
+                                btc = c.get("bitcoin", "0")
+                                usd = c.get("usd_value", "0")
+                                price = c.get("btc_price", "0")
                                 btc_balance_info = (
                                     f"🏢 MicroStrategy — Bitcoin Holdings\n"
                                     f"💰 {btc} BTC (~${usd})\n"
-                                    f"🟡 Fallback: GitHub/Bitcointreasuries"
+                                    f"📈 Avg buy price: ${price}\n"
+                                    f"🟡 Data via GitHub/Bitcointreasuries"
                                 )
-                                last_info = "📅 Fallback data used (CoinGecko rate-limited)"
+                                last_info = "📅 Fallback data used (CoinGecko unavailable)"
                                 break
                     else:
                         btc_balance_info = f"⚠️ Fallback API response: {r2.status}"
