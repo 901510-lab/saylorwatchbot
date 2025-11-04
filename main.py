@@ -108,7 +108,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Fallback to GitHub if needed ---
     if not cache_valid:
         try:
-            fallback_url = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/data/companies.json"
+            fallback_url = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/docs/data/companies.json"
             async with aiohttp.ClientSession() as fb_session:
                 async with fb_session.get(fallback_url, timeout=10) as fb_resp:
                     if fb_resp.status == 200:
