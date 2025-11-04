@@ -54,7 +54,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-                 # Get MicroStrategy BTC balance (primary + fallback, safe JSON parse)
+        # Get MicroStrategy BTC balance (resilient JSON parser + fallback)
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
         import json
@@ -72,31 +72,42 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(api_url, timeout=15) as resp:
                 text = await resp.text()
+
+                # If API returns HTML instead of JSON -> fallback immediately
+                if text.strip().startswith("<"):
+                    raise ValueError("HTML response")
+
                 try:
                     data = json.loads(text)
                 except json.JSONDecodeError:
-                    # fallback if API blocked or invalid
-                    fallback_url = (
-                        "https://raw.githubusercontent.com/coinforensics/"
-                        "bitcointreasuries/master/data/companies.json"
-                    )
-                    async with session.get(fallback_url, timeout=15) as fb_resp:
-                        fb_text = await fb_resp.text()
-                        data = json.loads(fb_text)
+                    raise ValueError("Invalid JSON")
 
-                for c in data:
-                    if "MicroStrategy" in c.get("name", ""):
-                        btc = c.get("bitcoin", "0")
-                        usd = c.get("usd_value", "0")
-                        price = c.get("btc_price", "0")
-                        btc_balance_info = (
-                            f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                            f"📈 Average buy price: ${price}"
-                        )
-                        break
+            # If primary failed, fallback
+    except Exception:
+        try:
+            fallback_url = (
+                "https://raw.githubusercontent.com/coinforensics/"
+                "bitcointreasuries/master/data/companies.json"
+            )
+            async with aiohttp.ClientSession() as fb_session:
+                async with fb_session.get(fallback_url, timeout=15) as fb_resp:
+                    fb_text = await fb_resp.text()
+                    data = json.loads(fb_text)
+        except Exception as e:
+            btc_balance_info = f"⚠️ Could not load data from any source ({type(e).__name__})"
+            data = []
 
-    except Exception as e:
-        btc_balance_info = f"⚠️ Error fetching balance: {type(e).__name__}"
+    # Extract MicroStrategy info if data loaded
+    for c in data:
+        if "MicroStrategy" in c.get("name", ""):
+            btc = c.get("bitcoin", "0")
+            usd = c.get("usd_value", "0")
+            price = c.get("btc_price", "0")
+            btc_balance_info = (
+                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
+                f"📈 Average buy price: ${price}"
+            )
+            break
 
     msg = (
         f"{status_msg}\n"
