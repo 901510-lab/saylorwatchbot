@@ -26,18 +26,75 @@ def write_log(msg: str):
 # === Commands ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Hello! Bot is active and running 24/7 🚀")
-
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import aiohttp
-    import datetime
 
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
 
-# --- Last purchase check (CoinGecko only, reliable) ---
-last_info = "📊 No recent purchase detected yet (waiting for update)."
-try:
-    async with aiohttp.ClientSession() as s:
+    # --- Last purchase check (CoinGecko only, reliable) ---
+    last_info = "📊 No recent purchase detected yet (waiting for update)."
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    for c in data.get("companies", []):
+                        if "MicroStrategy" in c.get("name", ""):
+                            holdings = float(c.get("total_holdings", 0))
+                            usd_value = c.get("total_current_value_usd", "0")
+                            last_info = f"💰 MicroStrategy holds {holdings} BTC (~${usd_value})"
+                            with open("last_purchase.txt", "w") as f:
+                                f.write(str(holdings))
+                            break
+                else:
+                    last_info = f"⚠️ CoinGecko API response: {r.status}"
+    except Exception as e:
+        last_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
+
+    # --- Get MicroStrategy BTC balance via bitcointreasuries.net ---
+    btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
+    try:
+        api_url = "https://bitcointreasuries.net/api/v2/companies"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://bitcointreasuries.net/",
+        }
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(api_url, timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for c in data:
+                        if "MicroStrategy" in c.get("name", ""):
+                            btc = c.get("bitcoin", "0")
+                            usd = c.get("usd_value", "0")
+                            price = c.get("btc_price", "0")
+                            btc_balance_info = (
+                                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
+                                f"📈 Average buy price: ${price}"
+                            )
+                            break
+                else:
+                    btc_balance_info = f"⚠️ API response: {resp.status}"
+    except Exception as e:
+        btc_balance_info = f"⚠️ Error fetching balance: {type(e).__name__}"
+
+    msg = (
+        f"{status_msg}\n"
+        f"{last_info}\n"
+        f"{btc_balance_info}\n"
+        f"🌐 Monitoring: {CHECK_URL}"
+    )
+
+    await update.message.reply_text(msg)
         async with s.get(
             "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
             timeout=aiohttp.ClientTimeout(total=10)
