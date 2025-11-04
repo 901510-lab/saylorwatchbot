@@ -58,7 +58,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
         api_url = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/data/companies.json"
-headers = {
+        headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
                   "Chrome/124.0 Safari/537.36",
