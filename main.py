@@ -8,6 +8,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from aiohttp import web
 from bs4 import BeautifulSoup
 from telegram.request import HTTPXRequest
+import json
 
 # === Initialization ===
 load_dotenv()
@@ -27,11 +28,9 @@ def write_log(msg: str):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Hello! Bot is active and running 24/7 🚀")
 
-# === FIXED /status COMMAND ===
+# === /status COMMAND WITH CACHE AND FALLBACK ===
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import aiohttp
-    import datetime
-    import json
 
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
@@ -44,7 +43,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if last_date:
                 last_info = f"📅 Last recorded purchase: {last_date}"
 
-    # === 2️⃣ Check site availability ===
+    # === 2️⃣ Site availability ===
     site_status = "❌ Connection error"
     try:
         async with aiohttp.ClientSession() as session:
@@ -56,39 +55,91 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-    # === 3️⃣ Get MicroStrategy BTC balance from CoinGecko ===
+    # === 3️⃣ MicroStrategy BTC balance (cached 24h + fallback) ===
+    cache_file = "mstr_balance_cache.json"
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
-    try:
-        async with aiohttp.ClientSession() as session:
-            url = "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin"
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    for c in data.get("companies", []):
-                        if "MicroStrategy" in c.get("name", ""):
-                            btc = c.get("total_holdings", "0")
-                            usd = c.get("total_current_value_usd", "0")
-                            entry = c.get("total_entry_value_usd", "0")
-                            btc_balance_info = (
-                                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                                f"📈 Entry value: ${entry}"
-                            )
-                            break
-                else:
-                    btc_balance_info = f"⚠️ API response: {resp.status}"
-    except Exception as e:
-        write_log(f"⚠️ Error fetching CoinGecko data: {e}")
-        btc_balance_info = f"⚠️ API error: {type(e).__name__}"
+    cache_valid = False
+    cache_time_str = "unknown"
+
+    # --- Try read cache ---
+    if os.path.exists(cache_file):
+        try:
+            cache_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(cache_file))
+            cache_age = (datetime.datetime.now() - cache_mtime).total_seconds()
+            if cache_age < 24 * 3600:
+                with open(cache_file, "r") as f:
+                    cached = json.load(f)
+                btc_balance_info = (
+                    f"💰 MicroStrategy balance: {cached['btc']} BTC (~${cached['usd']})\n"
+                    f"📈 Average buy price: ${cached['price']} (cached)"
+                )
+                cache_valid = True
+                cache_time_str = cache_mtime.strftime("%Y-%m-%d %H:%M")
+        except Exception as e:
+            write_log(f"⚠️ Cache read error: {e}")
+
+    # --- If no valid cache, request API ---
+    if not cache_valid:
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin"
+                async with session.get(url, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for c in data.get("companies", []):
+                            if "MicroStrategy" in c.get("name", ""):
+                                btc = c.get("total_holdings", "0")
+                                usd = c.get("total_current_value_usd", "0")
+                                entry = c.get("total_entry_value_usd", "0")
+                                btc_balance_info = (
+                                    f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
+                                    f"📈 Entry value: ${entry}"
+                                )
+                                with open(cache_file, "w") as f:
+                                    json.dump({"btc": btc, "usd": usd, "price": entry}, f)
+                                cache_valid = True
+                                cache_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                                break
+                    else:
+                        btc_balance_info = f"⚠️ API response: {resp.status}"
+        except Exception as e:
+            write_log(f"⚠️ CoinGecko error: {e}")
+
+    # --- Fallback to GitHub if needed ---
+    if not cache_valid:
+        try:
+            fallback_url = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/data/companies.json"
+            async with aiohttp.ClientSession() as fb_session:
+                async with fb_session.get(fallback_url, timeout=10) as fb_resp:
+                    if fb_resp.status == 200:
+                        fb_data = await fb_resp.json()
+                        for c in fb_data:
+                            if "MicroStrategy" in c.get("name", ""):
+                                btc = c.get("bitcoin", "0")
+                                usd = c.get("usd_value", "0")
+                                price = c.get("btc_price", "0")
+                                btc_balance_info = (
+                                    f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
+                                    f"📈 Average buy price: ${price}"
+                                )
+                                with open(cache_file, "w") as f:
+                                    json.dump({"btc": btc, "usd": usd, "price": price}, f)
+                                cache_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                                break
+                    else:
+                        btc_balance_info = f"⚠️ GitHub fallback error ({fb_resp.status})"
+        except Exception as e:
+            btc_balance_info = f"⚠️ Could not load fallback data ({type(e).__name__})"
 
     # === 4️⃣ Combine and send ===
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
         f"{btc_balance_info}\n"
+        f"🕒 Cache updated: {cache_time_str}\n"
         f"{site_status}\n"
         f"🌐 Monitoring: {CHECK_URL}"
     )
-
     await update.message.reply_text(msg)
 
 # === Other Commands ===
@@ -133,7 +184,6 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os._exit(0)
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Deletes recent bot messages"""
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Access denied.")
         return
@@ -141,7 +191,6 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     bot = context.bot
     deleted = 0
-
     try:
         current_msg_id = update.message.message_id
         for msg_id in range(current_msg_id - 50, current_msg_id):
@@ -173,7 +222,6 @@ LAST_PURCHASE_FILE = "last_purchase.txt"
 CHECK_URL = os.getenv("CHECK_URL", "https://saylortracker.com/")
 
 async def fetch_latest_purchase():
-    import aiohttp
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
@@ -245,7 +293,6 @@ async def _post_init(application: Application):
     application.create_task(start_healthcheck_server())
     application.create_task(monitor_saylor_purchases(application.bot))
     application.create_task(ping_alive(application.bot))
-
     write_log("🧩 post_init complete")
 
 async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
