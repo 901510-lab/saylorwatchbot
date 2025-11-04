@@ -284,7 +284,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("info", info))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("clear", clear))
-        app.add_handler(CommandHandler("site", site))
+    app.add_handler(CommandHandler("site", site))
 
     import requests
     requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true")
