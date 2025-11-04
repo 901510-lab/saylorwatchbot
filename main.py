@@ -24,8 +24,6 @@ def write_log(msg: str):
     logger.info(msg)
 
 # === Commands ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Hello! Bot is active and running 24/7 🚀")
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import aiohttp
 
@@ -47,6 +45,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             holdings = float(c.get("total_holdings", 0))
                             usd_value = c.get("total_current_value_usd", "0")
                             last_info = f"💰 MicroStrategy holds {holdings} BTC (~${usd_value})"
+                            # Save for future diff check
                             with open("last_purchase.txt", "w") as f:
                                 f.write(str(holdings))
                             break
@@ -68,6 +67,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Accept": "application/json, text/plain, */*",
             "Referer": "https://bitcointreasuries.net/",
         }
+
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(api_url, timeout=15) as resp:
                 if resp.status == 200:
