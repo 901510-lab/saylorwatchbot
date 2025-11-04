@@ -9,7 +9,7 @@ from aiohttp import web
 from bs4 import BeautifulSoup
 from telegram.request import HTTPXRequest
 
-# === Инициализация ===
+# === Initialization ===
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 X_CHAT_ID = os.getenv("X_CHAT_ID")
@@ -23,39 +23,39 @@ def write_log(msg: str):
     print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
     logger.info(msg)
 
-# === Команды ===
+# === Commands ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Бот активен и работает 24/7 🚀")
+    await update.message.reply_text("👋 Hello! Bot is active and running 24/7 🚀")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import aiohttp
     import datetime
 
     uptime = datetime.datetime.now() - start_time
-    status_msg = f"✅ Бот онлайн\n⏱ Аптайм: {uptime}\n"
+    status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
 
-    # Проверяем последний зафиксированный результат
-    last_info = "📊 Данных о последних покупках пока нет (бот ждёт обновления сайта)."
+    # Last purchase check
+    last_info = "📊 No recent purchase detected yet (waiting for update)."
     if os.path.exists(LAST_PURCHASE_FILE):
         with open(LAST_PURCHASE_FILE, "r") as f:
             last_date = f.read().strip()
             if last_date:
-                last_info = f"📅 Последняя покупка: {last_date}"
+                last_info = f"📅 Last recorded purchase: {last_date}"
 
-    # Проверяем сайт доступности
-    site_status = "❌ Ошибка подключения"
+    # Site availability
+    site_status = "❌ Connection error"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(CHECK_URL, timeout=10) as resp:
                 if resp.status == 200:
-                    site_status = "✅ Сайт доступен и работает"
+                    site_status = "✅ Website is reachable"
                 else:
-                    site_status = f"⚠️ Ответ сайта: {resp.status}"
+                    site_status = f"⚠️ Website response: {resp.status}"
     except Exception as e:
-        site_status = f"⚠️ Ошибка: {type(e).__name__}"
+        site_status = f"⚠️ Error: {type(e).__name__}"
 
-    # Получаем баланс MicroStrategy через bitcointreasuries.net
-    btc_balance_info = "⚠️ Не удалось получить баланс BTC"
+    # Bitcoin balance info
+    btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
         api_url = "https://bitcointreasuries.net/api/v2/companies"
         async with aiohttp.ClientSession() as session:
@@ -68,52 +68,51 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             usd = c.get("usd_value", "0")
                             price = c.get("btc_price", "0")
                             btc_balance_info = (
-                                f"💰 Баланс MicroStrategy: {btc} BTC (~${usd})\n"
-                                f"📈 Средняя цена покупки: ${price}"
+                                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
+                                f"📈 Average buy price: ${price}"
                             )
                             break
                 else:
-                    btc_balance_info = f"⚠️ API ответ: {resp.status}"
+                    btc_balance_info = f"⚠️ API response: {resp.status}"
     except Exception as e:
-        btc_balance_info = f"⚠️ Ошибка при получении баланса: {type(e).__name__}"
+        btc_balance_info = f"⚠️ Balance fetch error: {type(e).__name__}"
 
-    # Итоговое сообщение
     msg = (
         f"{status_msg}\n"
         f"{last_info}\n"
         f"{btc_balance_info}\n"
         f"{site_status}\n"
-        f"🌐 Мониторинг: {CHECK_URL}"
+        f"🌐 Monitoring: {CHECK_URL}"
     )
 
     await update.message.reply_text(msg)
 
 async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
-    await update.message.reply_text(f"⏱ Аптайм: {uptime}")
+    await update.message.reply_text(f"⏱ Uptime: {uptime}")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "📖 *Команды:*\n"
-        "/start — проверить статус бота\n"
-        "/status — аптайм и состояние\n"
-        "/uptime — время работы\n"
-        "/info — информация о системе\n"
-        "/site — какой сайт мониторится\n"
-        "/clear — удалить сообщения бота\n"
-        "/restart — перезапуск Render-инстанса (админ)\n"
+        "📖 *Commands:*\n"
+        "/start — check bot status\n"
+        "/status — show uptime and system info\n"
+        "/uptime — show uptime\n"
+        "/info — system details\n"
+        "/site — show monitored site\n"
+        "/clear — delete recent bot messages\n"
+        "/restart — restart Render instance (admin only)\n"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
-        await update.message.reply_text("⛔ Доступ запрещён.")
+        await update.message.reply_text("⛔ Access denied.")
         return
     commit = os.getenv("RENDER_GIT_COMMIT", "N/A")
     instance = os.getenv("RENDER_INSTANCE_ID", "N/A")
     uptime = datetime.datetime.now() - start_time
     msg = (
-        f"🧠 *Информация о боте:*\n"
+        f"🧠 *Bot Information:*\n"
         f"Commit: `{commit}`\n"
         f"Instance: `{instance}`\n"
         f"Uptime: {uptime}\n"
@@ -123,16 +122,15 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
-        await update.message.reply_text("⛔ Доступ запрещён.")
+        await update.message.reply_text("⛔ Access denied.")
         return
-    await update.message.reply_text("🔄 Перезапуск Render-инстанса...")
+    await update.message.reply_text("🔄 Restarting Render instance...")
     os._exit(0)
 
-# === Команда /clear (работает в polling и Render) ===
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Удаляет последние сообщения, отправленные ботом"""
+    """Deletes recent bot messages"""
     if str(update.effective_user.id) != str(X_CHAT_ID):
-        await update.message.reply_text("⛔ Доступ запрещён.")
+        await update.message.reply_text("⛔ Access denied.")
         return
 
     chat_id = update.effective_chat.id
@@ -140,7 +138,6 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deleted = 0
 
     try:
-        # Определим диапазон последних message_id (до 50 назад)
         current_msg_id = update.message.message_id
         for msg_id in range(current_msg_id - 50, current_msg_id):
             try:
@@ -148,16 +145,12 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 deleted += 1
                 await asyncio.sleep(0.1)
             except Exception:
-                pass  # пропускаем, если сообщение уже удалено или не принадлежит боту
-
-        await update.message.reply_text(f"🧹 Удалено сообщений: {deleted}")
+                pass
+        await update.message.reply_text(f"🧹 Deleted messages: {deleted}")
     except Exception as e:
-        await update.message.reply_text(
-            f"⚠️ Ошибка при очистке: {e}\n"
-            "Совет: попробуй ещё раз через 10–15 секунд."
-        )
+        await update.message.reply_text(f"⚠️ Error clearing messages: {e}")
 
-# === Health-check ===
+# === Health check ===
 async def handle(request):
     return web.Response(text="✅ SaylorWatchBot is alive")
 
@@ -168,33 +161,26 @@ async def start_healthcheck_server():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    write_log(f"🌐 Health-check сервер запущен на порту {PORT}")
+    write_log(f"🌐 Health-check server started on port {PORT}")
 
-# === Мониторинг SaylorTracker ===
+# === Monitoring ===
 LAST_PURCHASE_FILE = "last_purchase.txt"
 CHECK_URL = os.getenv("CHECK_URL", "https://saylortracker.com/")
 
 async def fetch_latest_purchase():
     import aiohttp
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/123.0 Safari/537.36"
-        )
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(CHECK_URL, timeout=20) as resp:
                 if resp.status != 200:
-                    write_log(f"⚠️ API ответ: {resp.status}")
+                    write_log(f"⚠️ API response: {resp.status}")
                     return None
                 html = await resp.text()
     except Exception as e:
-        write_log(f"⚠️ Ошибка сети: {e}")
+        write_log(f"⚠️ Network error: {e}")
         return None
 
-    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table")
     if not table:
@@ -213,29 +199,28 @@ async def monitor_saylor_purchases(bot: Bot):
     if os.path.exists(LAST_PURCHASE_FILE):
         with open(LAST_PURCHASE_FILE, "r") as f:
             last_date = f.read().strip()
-    write_log(f"🕵️ Мониторинг {CHECK_URL}")
+    write_log(f"🕵️ Monitoring {CHECK_URL}")
     while True:
         try:
             purchase = await fetch_latest_purchase()
             if purchase and purchase["date"] != last_date:
                 msg = (
-                    f"💰 *MicroStrategy купила Bitcoin!*\n"
-                    f"📅 Дата: {purchase['date']}\n"
-                    f"₿ Количество: {purchase['amount']}\n"
-                    f"💵 Сумма: {purchase['total']}\n"
-                    f"🌐 Источник: {CHECK_URL}"
+                    f"💰 *MicroStrategy bought Bitcoin!*\n"
+                    f"📅 Date: {purchase['date']}\n"
+                    f"₿ Amount: {purchase['amount']}\n"
+                    f"💵 Total: {purchase['total']}\n"
+                    f"🌐 Source: {CHECK_URL}"
                 )
                 await bot.send_message(chat_id=X_CHAT_ID, text=msg, parse_mode="Markdown")
                 last_date = purchase["date"]
                 with open(LAST_PURCHASE_FILE, "w") as f:
                     f.write(last_date)
             else:
-                write_log("ℹ️ Проверка — без изменений")
+                write_log("ℹ️ Checked — no updates.")
         except Exception as e:
-            write_log(f"⚠️ Ошибка мониторинга: {e}")
+            write_log(f"⚠️ Monitoring error: {e}")
         await asyncio.sleep(15 * 60)
 
-# === Автопинг ===
 async def ping_alive(bot: Bot):
     while True:
         await asyncio.sleep(6 * 60 * 60)
@@ -243,29 +228,24 @@ async def ping_alive(bot: Bot):
         try:
             await bot.send_message(chat_id=X_CHAT_ID, text=f"✅ Still alive (uptime: {uptime})")
         except Exception as e:
-            write_log(f"⚠️ Ошибка авто-пинга: {e}")
+            write_log(f"⚠️ Auto-ping error: {e}")
 
-# === Post-init ===
 async def _post_init(application: Application):
     try:
-        # 🔧 Принудительная очистка webhook и любых polling-сессий
         await application.bot.delete_webhook(drop_pending_updates=True)
-        write_log("🧹 Telegram webhook и polling-сессии очищены (post_init)")
+        write_log("🧹 Telegram webhook and polling sessions cleared (post_init)")
     except Exception as e:
-        write_log(f"⚠️ Ошибка при очистке polling-сессий: {e}")
+        write_log(f"⚠️ Polling clear error: {e}")
 
-    # 🔁 Запуск фоновых задач
     application.create_task(start_healthcheck_server())
     application.create_task(monitor_saylor_purchases(application.bot))
     application.create_task(ping_alive(application.bot))
 
-    write_log("🧩 post_init завершён")
+    write_log("🧩 post_init complete")
 
-# === Команда /site ===
 async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"🌐 Мониторится сайт:\n{CHECK_URL}")
+    await update.message.reply_text(f"🌐 Monitored website:\n{CHECK_URL}")
 
-# === Запуск ===
 if __name__ == "__main__":
     request = HTTPXRequest(connection_pool_size=50, read_timeout=30, write_timeout=30)
     app = (
@@ -285,5 +265,4 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
 
-if __name__ == "__main__":
     asyncio.run(app.run_polling())
