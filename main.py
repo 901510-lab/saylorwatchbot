@@ -34,25 +34,29 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
 
-    # Last purchase check
-    last_info = "📊 No recent purchase detected yet (waiting for update)."
-    if os.path.exists(LAST_PURCHASE_FILE):
-        with open(LAST_PURCHASE_FILE, "r") as f:
-            last_date = f.read().strip()
-            if last_date:
-                last_info = f"📅 Last recorded purchase: {last_date}"
-
-    # Site availability
-    site_status = "❌ Connection error"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(CHECK_URL, timeout=10) as resp:
-                if resp.status == 200:
-                    site_status = "✅ Website is reachable"
-                else:
-                    site_status = f"⚠️ Website response: {resp.status}"
-    except Exception as e:
-        site_status = f"⚠️ Error: {type(e).__name__}"
+# --- Last purchase check (CoinGecko only, reliable) ---
+last_info = "📊 No recent purchase detected yet (waiting for update)."
+try:
+    async with aiohttp.ClientSession() as s:
+        async with s.get(
+            "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as r:
+            if r.status == 200:
+                data = await r.json()
+                for c in data.get("companies", []):
+                    if "MicroStrategy" in c.get("name", ""):
+                        holdings = float(c.get("total_holdings", 0))
+                        usd_value = c.get("total_current_value_usd", "0")
+                        last_info = f"💰 MicroStrategy holds {holdings} BTC (~${usd_value})"
+                        # Save for future diff check
+                        with open("last_purchase.txt", "w") as f:
+                            f.write(str(holdings))
+                        break
+            else:
+                last_info = f"⚠️ CoinGecko API response: {r.status}"
+except Exception as e:
+    last_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
 
        # Get MicroStrategy BTC balance via bitcointreasuries.net
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
