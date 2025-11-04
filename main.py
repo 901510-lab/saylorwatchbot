@@ -54,7 +54,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-             # Get MicroStrategy BTC balance (primary + fallback)
+                 # Get MicroStrategy BTC balance (primary + fallback, safe JSON parse)
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
         import json
@@ -71,11 +71,11 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(api_url, timeout=15) as resp:
-                if resp.status == 200:
-                    text = await resp.text()
+                text = await resp.text()
+                try:
                     data = json.loads(text)
-                else:
-                    # fallback if API blocked
+                except json.JSONDecodeError:
+                    # fallback if API blocked or invalid
                     fallback_url = (
                         "https://raw.githubusercontent.com/coinforensics/"
                         "bitcointreasuries/master/data/companies.json"
