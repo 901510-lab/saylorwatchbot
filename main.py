@@ -19,9 +19,11 @@ logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s", level=logg
 logger = logging.getLogger(__name__)
 start_time = datetime.datetime.now()
 
+
 def write_log(msg: str):
     print(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}")
     logger.info(msg)
+
 
 # === Commands ===
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45,7 +47,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             holdings = float(c.get("total_holdings", 0))
                             usd_value = c.get("total_current_value_usd", "0")
                             last_info = f"💰 MicroStrategy holds {holdings} BTC (~${usd_value})"
-                            # Save for future diff check
                             with open("last_purchase.txt", "w") as f:
                                 f.write(str(holdings))
                             break
@@ -95,73 +96,12 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(msg)
-        async with s.get(
-            "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
-            timeout=aiohttp.ClientTimeout(total=10)
-        ) as r:
-            if r.status == 200:
-                data = await r.json()
-                for c in data.get("companies", []):
-                    if "MicroStrategy" in c.get("name", ""):
-                        holdings = float(c.get("total_holdings", 0))
-                        usd_value = c.get("total_current_value_usd", "0")
-                        last_info = f"💰 MicroStrategy holds {holdings} BTC (~${usd_value})"
-                        # Save for future diff check
-                        with open("last_purchase.txt", "w") as f:
-                            f.write(str(holdings))
-                        break
-            else:
-                last_info = f"⚠️ CoinGecko API response: {r.status}"
-except Exception as e:
-    last_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
 
-       # Get MicroStrategy BTC balance via bitcointreasuries.net
-    btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
-    try:
-        api_url = "https://bitcointreasuries.net/api/v2/companies"
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0 Safari/537.36"
-            ),
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://bitcointreasuries.net/",
-        }
-
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(api_url, timeout=15) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    for c in data:
-                        if "MicroStrategy" in c.get("name", ""):
-                            btc = c.get("bitcoin", "0")
-                            usd = c.get("usd_value", "0")
-                            price = c.get("btc_price", "0")
-                            btc_balance_info = (
-                                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                                f"📈 Average buy price: ${price}"
-                            )
-                            break
-                else:
-                    btc_balance_info = f"⚠️ API response: {resp.status}"
-
-    except Exception as e:
-        btc_balance_info = f"⚠️ Error fetching balance: {type(e).__name__}"
-
-    msg = (
-        f"{status_msg}\n"
-        f"{last_info}\n"
-        f"{btc_balance_info}\n"
-        f"{site_status}\n"
-        f"🌐 Monitoring: {CHECK_URL}"
-    )
-
-    await update.message.reply_text(msg)
 
 async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     await update.message.reply_text(f"⏱ Uptime: {uptime}")
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
@@ -175,6 +115,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/restart — restart Render instance (admin only)\n"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
+
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
@@ -192,12 +133,14 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
         await update.message.reply_text("⛔ Access denied.")
         return
     await update.message.reply_text("🔄 Restarting Render instance...")
     os._exit(0)
+
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Deletes recent bot messages"""
@@ -222,9 +165,11 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error clearing messages: {e}")
 
+
 # === Health check ===
 async def handle(request):
     return web.Response(text="✅ SaylorWatchBot is alive")
+
 
 async def start_healthcheck_server():
     app = web.Application()
@@ -235,9 +180,11 @@ async def start_healthcheck_server():
     await site.start()
     write_log(f"🌐 Health-check server started on port {PORT}")
 
+
 # === Monitoring ===
 LAST_PURCHASE_FILE = "last_purchase.txt"
 CHECK_URL = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/docs/companies.json"
+
 
 async def fetch_latest_purchase():
     import aiohttp
@@ -266,6 +213,7 @@ async def fetch_latest_purchase():
     date, amount, price, total = cells[0], cells[1], cells[2], cells[3]
     return {"date": date, "amount": amount, "price": price, "total": total}
 
+
 async def monitor_saylor_purchases(bot: Bot):
     last_date = None
     if os.path.exists(LAST_PURCHASE_FILE):
@@ -293,6 +241,7 @@ async def monitor_saylor_purchases(bot: Bot):
             write_log(f"⚠️ Monitoring error: {e}")
         await asyncio.sleep(15 * 60)
 
+
 async def ping_alive(bot: Bot):
     while True:
         await asyncio.sleep(6 * 60 * 60)
@@ -301,6 +250,7 @@ async def ping_alive(bot: Bot):
             await bot.send_message(chat_id=X_CHAT_ID, text=f"✅ Still alive (uptime: {uptime})")
         except Exception as e:
             write_log(f"⚠️ Auto-ping error: {e}")
+
 
 async def _post_init(application: Application):
     try:
@@ -315,8 +265,10 @@ async def _post_init(application: Application):
 
     write_log("🧩 post_init complete")
 
+
 async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🌐 Monitored website:\n{CHECK_URL}")
+
 
 if __name__ == "__main__":
     request = HTTPXRequest(connection_pool_size=50, read_timeout=30, write_timeout=30)
@@ -328,7 +280,6 @@ if __name__ == "__main__":
         .build()
     )
 
-    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("uptime", uptime))
     app.add_handler(CommandHandler("help", help_command))
