@@ -54,9 +54,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-          # Get MicroStrategy BTC balance (primary + fallback)
+             # Get MicroStrategy BTC balance (primary + fallback)
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
+        import json
         api_url = "https://bitcointreasuries.net/api/v2/companies"
         headers = {
             "User-Agent": (
@@ -71,7 +72,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(api_url, timeout=15) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    text = await resp.text()
+                    data = json.loads(text)
                 else:
                     # fallback if API blocked
                     fallback_url = (
@@ -79,7 +81,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "bitcointreasuries/master/data/companies.json"
                     )
                     async with session.get(fallback_url, timeout=15) as fb_resp:
-                        data = await fb_resp.json()
+                        fb_text = await fb_resp.text()
+                        data = json.loads(fb_text)
 
                 for c in data:
                     if "MicroStrategy" in c.get("name", ""):
@@ -281,6 +284,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("info", info))
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("clear", clear))
-    app.add_handler(CommandHandler("site", site))
+        app.add_handler(CommandHandler("site", site))
+
+    import requests
+    requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true")
 
     asyncio.run(app.run_polling())
