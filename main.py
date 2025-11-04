@@ -55,37 +55,29 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         last_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
 
-    # --- Get MicroStrategy BTC balance via CoinMarketCap API ---
+    # --- MicroStrategy BTC balance (via CoinGecko only, simplified) ---
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
-        CMC_API_KEY = os.getenv("CMC_API_KEY")
-        if not CMC_API_KEY:
-            raise ValueError("Missing CMC_API_KEY in environment")
-
-        api_url = "https://pro-api.coinmarketcap.com/v2/companies/public_treasury/bitcoin"
-        headers = {
-            "Accepts": "application/json",
-            "X-CMC_PRO_API_KEY": CMC_API_KEY,
-            "User-Agent": "SaylorWatchBot/1.0"
-        }
-
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(api_url, timeout=15) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    for c in data.get("data", []):
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    for c in data.get("companies", []):
                         if "MicroStrategy" in c.get("name", ""):
-                            btc = c.get("total_holdings", "0")
+                            btc = float(c.get("total_holdings", 0))
                             usd = c.get("total_current_value_usd", "0")
                             btc_balance_info = (
                                 f"🏢 MicroStrategy — Bitcoin Holdings\n"
-                                f"💰 {btc} BTC (~${usd})"
+                                f"💰 {btc} BTC (~${usd}) [via CoinGecko]"
                             )
                             break
                 else:
-                    btc_balance_info = f"⚠️ CoinMarketCap API response: {resp.status}"
+                    btc_balance_info = f"⚠️ CoinGecko API response: {r.status}"
     except Exception as e:
-        btc_balance_info = f"⚠️ CoinMarketCap fetch error: {type(e).__name__}"
+        btc_balance_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
 
     # --- Final message ---
     msg = (
