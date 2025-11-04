@@ -54,7 +54,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-       # Get MicroStrategy BTC balance via bitcointreasuries.net
+          # Get MicroStrategy BTC balance (primary + fallback)
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
         api_url = "https://bitcointreasuries.net/api/v2/companies"
@@ -72,18 +72,25 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             async with session.get(api_url, timeout=15) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    for c in data:
-                        if "MicroStrategy" in c.get("name", ""):
-                            btc = c.get("bitcoin", "0")
-                            usd = c.get("usd_value", "0")
-                            price = c.get("btc_price", "0")
-                            btc_balance_info = (
-                                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                                f"📈 Average buy price: ${price}"
-                            )
-                            break
                 else:
-                    btc_balance_info = f"⚠️ API response: {resp.status}"
+                    # fallback if API blocked
+                    fallback_url = (
+                        "https://raw.githubusercontent.com/coinforensics/"
+                        "bitcointreasuries/master/data/companies.json"
+                    )
+                    async with session.get(fallback_url, timeout=15) as fb_resp:
+                        data = await fb_resp.json()
+
+                for c in data:
+                    if "MicroStrategy" in c.get("name", ""):
+                        btc = c.get("bitcoin", "0")
+                        usd = c.get("usd_value", "0")
+                        price = c.get("btc_price", "0")
+                        btc_balance_info = (
+                            f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
+                            f"📈 Average buy price: ${price}"
+                        )
+                        break
 
     except Exception as e:
         btc_balance_info = f"⚠️ Error fetching balance: {type(e).__name__}"
