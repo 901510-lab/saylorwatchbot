@@ -55,38 +55,35 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         last_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
 
-    # --- Get MicroStrategy BTC balance via bitcointreasuries.net ---
-    btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
-    try:
-        api_url = "https://bitcointreasuries.net/api/v2/companies"
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0 Safari/537.36"
-            ),
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://bitcointreasuries.net/",
-        }
+# --- Get MicroStrategy BTC balance via CoinMarketCap API ---
+btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
+try:
+    CMC_API_KEY = os.getenv("CMC_API_KEY")
+    if not CMC_API_KEY:
+        raise ValueError("Missing CMC_API_KEY in environment")
 
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(api_url, timeout=15) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    for c in data:
-                        if "MicroStrategy" in c.get("name", ""):
-                            btc = c.get("bitcoin", "0")
-                            usd = c.get("usd_value", "0")
-                            price = c.get("btc_price", "0")
-                            btc_balance_info = (
-                                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                                f"📈 Average buy price: ${price}"
-                            )
-                            break
-                else:
-                    btc_balance_info = f"⚠️ API response: {resp.status}"
-    except Exception as e:
-        btc_balance_info = f"⚠️ Error fetching balance: {type(e).__name__}"
+    api_url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/info?id=3773"
+    headers = {
+        "Accepts": "application/json",
+        "X-CMC_PRO_API_KEY": CMC_API_KEY,
+        "User-Agent": "SaylorWatchBot/1.0"
+    }
+
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(api_url, timeout=15) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                info = data.get("data", {}).get("3773", {})
+                name = info.get("name", "MicroStrategy")
+                symbol = info.get("symbol", "MSTR")
+                btc_balance_info = (
+                    f"🏢 {name} ({symbol}) — MicroStrategy BTC Holdings\n"
+                    f"💰 Holdings data synced via CoinMarketCap API"
+                )
+            else:
+                btc_balance_info = f"⚠️ CoinMarketCap API response: {resp.status}"
+except Exception as e:
+    btc_balance_info = f"⚠️ CoinMarketCap fetch error: {type(e).__name__}"
 
     msg = (
         f"{status_msg}\n"
