@@ -176,7 +176,7 @@ async def start_healthcheck_server():
 
 # === Monitoring ===
 LAST_PURCHASE_FILE = "last_purchase.txt"
-CHECK_URL = os.getenv("CHECK_URL", "https://saylortracker.com/")
+CHECK_URL = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/docs/companies.json"
 
 async def fetch_latest_purchase():
     import aiohttp
