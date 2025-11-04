@@ -57,9 +57,16 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Bitcoin balance info
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
-        api_url = "https://bitcointreasuries.net/api/v2/companies"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, timeout=15) as resp:
+        api_url = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/data/companies.json"
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/124.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://bitcointreasuries.net/",
+}
+async with aiohttp.ClientSession(headers=headers) as session:
+    async with session.get(api_url, timeout=15) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     for c in data:
