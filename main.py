@@ -55,7 +55,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-    # === 3️⃣ MicroStrategy BTC balance (cached 24h + fallback) ===
+    # === 3️⃣ MicroStrategy BTC balance (cached 24h + fallback chain) ===
     cache_file = "mstr_balance_cache.json"
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     cache_valid = False
@@ -78,7 +78,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             write_log(f"⚠️ Cache read error: {e}")
 
-    # --- If no valid cache, request API ---
+    # --- 1️⃣ Try CoinGecko API ---
     if not cache_valid:
         try:
             async with aiohttp.ClientSession() as session:
@@ -93,7 +93,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 entry = c.get("total_entry_value_usd", "0")
                                 btc_balance_info = (
                                     f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                                    f"📈 Entry value: ${entry}"
+                                    f"📈 Entry value: ${entry}\n"
+                                    f"🟢 Source: CoinGecko"
                                 )
                                 with open(cache_file, "w") as f:
                                     json.dump({"btc": btc, "usd": usd, "price": entry}, f)
@@ -105,7 +106,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             write_log(f"⚠️ CoinGecko error: {e}")
 
-    # --- Fallback to GitHub if needed ---
+    # --- 2️⃣ Fallback to GitHub ---
     if not cache_valid:
         try:
             fallback_url = "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/docs/companies.json"
@@ -120,16 +121,48 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 price = c.get("btc_price", "0")
                                 btc_balance_info = (
                                     f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
-                                    f"📈 Average buy price: ${price}"
+                                    f"📈 Average buy price: ${price}\n"
+                                    f"🟡 Source: GitHub"
                                 )
                                 with open(cache_file, "w") as f:
                                     json.dump({"btc": btc, "usd": usd, "price": price}, f)
                                 cache_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                                cache_valid = True
                                 break
                     else:
-                        btc_balance_info = f"⚠️ GitHub fallback error ({fb_resp.status})"
+                        write_log(f"⚠️ GitHub fallback HTTP {fb_resp.status}")
         except Exception as e:
-            btc_balance_info = f"⚠️ Could not load fallback data ({type(e).__name__})"
+            write_log(f"⚠️ GitHub fallback error: {e}")
+
+    # --- 3️⃣ Fallback to CoinMarketCap ---
+    if not cache_valid:
+        try:
+            cmc_url = "https://api.coinmarketcap.com/data-api/v3/company/all?convert=USD"
+            async with aiohttp.ClientSession() as cmc_session:
+                async with cmc_session.get(cmc_url, timeout=10) as cmc_resp:
+                    if cmc_resp.status == 200:
+                        cmc_data = await cmc_resp.json()
+                        companies = cmc_data.get("data", {}).get("companyHoldings", [])
+                        for c in companies:
+                            name = c.get("name", "")
+                            if "MicroStrategy" in name:
+                                btc = c.get("total_holdings", "0")
+                                usd = c.get("total_value_usd", "0")
+                                avg = c.get("average_buy_price", "0")
+                                btc_balance_info = (
+                                    f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
+                                    f"📈 Average buy price: ${avg}\n"
+                                    f"🔵 Source: CoinMarketCap"
+                                )
+                                with open(cache_file, "w") as f:
+                                    json.dump({"btc": btc, "usd": usd, "price": avg}, f)
+                                cache_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                                cache_valid = True
+                                break
+                    else:
+                        write_log(f"⚠️ CoinMarketCap fallback HTTP {cmc_resp.status}")
+        except Exception as e:
+            write_log(f"⚠️ CoinMarketCap fallback error: {e}")
 
     # === 4️⃣ Combine and send ===
     msg = (
