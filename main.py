@@ -62,7 +62,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not CMC_API_KEY:
             raise ValueError("Missing CMC_API_KEY in environment")
 
-        api_url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/info?id=3773"
+        api_url = "https://pro-api.coinmarketcap.com/v2/companies/public_treasury/bitcoin"
         headers = {
             "Accepts": "application/json",
             "X-CMC_PRO_API_KEY": CMC_API_KEY,
@@ -70,18 +70,20 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(api_url, timeout=15) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    info = data.get("data", {}).get("3773", {})
-                    name = info.get("name", "MicroStrategy")
-                    symbol = info.get("symbol", "MSTR")
+    async with session.get(api_url, timeout=15) as resp:
+        if resp.status == 200:
+            data = await resp.json()
+            for c in data.get("data", []):
+                if "MicroStrategy" in c.get("name", ""):
+                    btc = c.get("total_holdings", "0")
+                    usd = c.get("total_current_value_usd", "0")
                     btc_balance_info = (
-                        f"🏢 {name} ({symbol}) — MicroStrategy BTC Holdings\n"
-                        f"💰 Holdings data synced via CoinMarketCap API"
+                        f"🏢 MicroStrategy — Bitcoin Holdings\n"
+                        f"💰 {btc} BTC (~${usd})"
                     )
-                else:
-                    btc_balance_info = f"⚠️ CoinMarketCap API response: {resp.status}"
+                    break
+        else:
+            btc_balance_info = f"⚠️ CoinMarketCap API response: {resp.status}"
     except Exception as e:
         btc_balance_info = f"⚠️ CoinMarketCap fetch error: {type(e).__name__}"
 
