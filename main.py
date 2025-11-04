@@ -54,33 +54,27 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         site_status = f"⚠️ Error: {type(e).__name__}"
 
-        # Get MicroStrategy BTC balance (resilient JSON parser + fallback)
+           # Get MicroStrategy BTC balance using CoinGecko API
     btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     try:
-        import json
-        api_url = "https://bitcointreasuries.net/api/v2/companies"
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0 Safari/537.36"
-            ),
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://bitcointreasuries.net/",
-        }
-
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(api_url, timeout=15) as resp:
-                text = await resp.text()
-
-                # If API returns HTML instead of JSON -> fallback immediately
-                if text.strip().startswith("<"):
-                    raise ValueError("HTML response")
-
-                try:
-                    data = json.loads(text)
-                except json.JSONDecodeError:
-                    raise ValueError("Invalid JSON")
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for c in data.get("companies", []):
+                        if "MicroStrategy" in c.get("name", ""):
+                            btc = c.get("total_holdings", "0")
+                            usd = c.get("total_current_value_usd", "0")
+                            price = c.get("total_entry_value_usd", "0")
+                            btc_balance_info = (
+                                f"💰 MicroStrategy balance: {btc} BTC (~${usd})\n"
+                                f"📈 Entry value: ${price}"
+                            )
+                            break
+                else:
+                    btc_balance_info = f"⚠️ API response: {resp.status}"
+    except Exception as e:
+        btc_balance_info = f"⚠️ Error fetching balance: {type(e).__name__}"
 
             # If primary failed, fallback
     except Exception:
