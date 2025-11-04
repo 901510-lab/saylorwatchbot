@@ -32,10 +32,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
 
-    # --- Get MicroStrategy BTC balance via CoinGecko ---
-    btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
     last_info = "📊 No recent purchase detected yet (waiting for update)."
+    btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
 
+    # === Primary source: CoinGecko ===
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(
@@ -55,14 +55,38 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 f"📈 Entry value: ${avg_price}\n"
                                 f"🟢 Data via CoinGecko"
                             )
-                            last_info = f"📅 Latest data updated successfully."
+                            last_info = "📅 Latest data fetched from CoinGecko"
                             with open("last_purchase.txt", "w") as f:
                                 f.write(str(btc))
                             break
                 else:
-                    btc_balance_info = f"⚠️ CoinGecko API response: {r.status}"
+                    raise Exception(f"CoinGecko API response: {r.status}")
     except Exception as e:
-        btc_balance_info = f"⚠️ CoinGecko fetch error: {type(e).__name__}"
+        write_log(f"⚠️ CoinGecko error: {e}")
+        # === Fallback source: GitHub (Bitcointreasuries) ===
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(
+                    "https://raw.githubusercontent.com/coinforensics/bitcointreasuries/master/docs/companies.json",
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as r2:
+                    if r2.status == 200:
+                        data2 = await r2.json()
+                        for c in data2.get("companies", []):
+                            if "MicroStrategy" in c.get("name", ""):
+                                btc = float(c.get("total_holdings", 0))
+                                usd = c.get("total_current_value_usd", "0")
+                                btc_balance_info = (
+                                    f"🏢 MicroStrategy — Bitcoin Holdings\n"
+                                    f"💰 {btc} BTC (~${usd})\n"
+                                    f"🟡 Fallback: GitHub/Bitcointreasuries"
+                                )
+                                last_info = "📅 Fallback data used (CoinGecko rate-limited)"
+                                break
+                    else:
+                        btc_balance_info = f"⚠️ Fallback API response: {r2.status}"
+        except Exception as e2:
+            btc_balance_info = f"⚠️ Fallback fetch error: {type(e2).__name__}"
 
     msg = (
         f"{status_msg}\n"
