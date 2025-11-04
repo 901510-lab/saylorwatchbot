@@ -95,7 +95,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(msg)
-
         async with s.get(
             "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
             timeout=aiohttp.ClientTimeout(total=10)
