@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from aiohttp import web
-from bs4 import BeautifulSoup
 from telegram.request import HTTPXRequest
 
 # === Initialization ===
@@ -187,7 +186,6 @@ async def start_healthcheck_server():
 LAST_PURCHASE_FILE = "last_purchase.txt"
 CHECK_URL = "https://raw.githubusercontent.com/bitcointreasuries/bitcointreasuries.github.io/master/_data/companies.json"
 
-
 async def fetch_latest_purchase():
     import aiohttp
 
@@ -206,7 +204,7 @@ async def fetch_latest_purchase():
         write_log(f"⚠️ Network error: {e}")
         return None
 
-    # ищем MicroStrategy / Strategy
+    # ищем Strategy / MicroStrategy
     for company in data:
         name = company.get("name", "")
 
