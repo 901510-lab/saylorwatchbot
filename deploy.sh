@@ -11,7 +11,7 @@ if [ ! -d .git ]; then
 fi
 
 echo "🧩 Добавляем изменения..."
-git add main.py requirements.txt .env
+git add main.py requirements.txt Procfile runtime.txt start.sh deploy.sh .gitignore
 
 echo "💬 Введите комментарий к коммиту:"
 read commit_message
