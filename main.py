@@ -190,17 +190,37 @@ CHECK_URL = "https://raw.githubusercontent.com/bitcointreasuries/bitcointreasuri
 
 async def fetch_latest_purchase():
     import aiohttp
+
     headers = {"User-Agent": "Mozilla/5.0"}
+
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(CHECK_URL, timeout=20) as resp:
                 if resp.status != 200:
                     write_log(f"⚠️ API response: {resp.status}")
                     return None
-                html = await resp.text()
+
+                data = await resp.json()
+
     except Exception as e:
         write_log(f"⚠️ Network error: {e}")
         return None
+
+    # ищем MicroStrategy / Strategy
+    for company in data:
+        name = company.get("name", "")
+
+        if "MicroStrategy" in name or "Strategy" in name:
+            btc = float(company.get("bitcoin", 0))
+            usd = company.get("usd_value", 0)
+
+            return {
+                "name": name,
+                "btc": btc,
+                "usd": usd
+            }
+
+    return None
 
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table")
