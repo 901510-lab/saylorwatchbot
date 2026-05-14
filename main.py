@@ -54,9 +54,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 f"📈 Entry value: ${avg_price}\n"
                                 f"🟢 Data via CoinGecko"
                             )
-                            last_info = "📅 Latest data fetched from CoinGecko"
-                            with open("last_purchase.txt", "w") as f:
-                                f.write(str(btc))
+                            last_info = "📅 Latest data fetched from CoinGecko"                        
                             break
                 else:
                     raise Exception(f"CoinGecko API response: {r.status}")
