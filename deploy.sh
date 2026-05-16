@@ -18,6 +18,7 @@ PROJECT_FILES=(
   README.md
   Dockerfile
   railway.json
+  render.yaml
   .dockerignore
 )
 

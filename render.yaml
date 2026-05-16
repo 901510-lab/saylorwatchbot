@@ -1,0 +1,22 @@
+# Blueprint: Render Dashboard → New → Blueprint → repo saylorwatchbot
+# Free Web Service, no credit card required for Hobby plan.
+services:
+  - type: web
+    name: saylorwatchbot
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: chmod +x start.sh && ./start.sh
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.6
+      - key: MONITOR_INTERVAL_SECONDS
+        value: "900"
+      - key: ENABLE_ALIVE_PING
+        value: "false"
+      - key: BOT_TOKEN
+        sync: false
+      - key: X_CHAT_ID
+        sync: false
