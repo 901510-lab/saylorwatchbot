@@ -1,0 +1,13 @@
+.env
+.venv
+__pycache__
+*.py[cod]
+.git
+.gitignore
+*.patch
+codex.patch
+codex-no-deploy.patch
+last_holdings.json
+last_purchase.txt
+README.md
+deploy.sh
