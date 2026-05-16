@@ -2,4 +2,4 @@
 set -e
 
 echo "Starting SaylorWatchBot..."
-python main.py
+exec python3 main.py

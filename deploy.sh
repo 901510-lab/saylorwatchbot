@@ -16,6 +16,9 @@ PROJECT_FILES=(
   .gitignore
   .env.example
   README.md
+  Dockerfile
+  railway.json
+  .dockerignore
 )
 
 REMOTE_NAME="${REMOTE_NAME:-origin}"
