@@ -252,6 +252,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
+async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"Chat ID: {update.effective_chat.id}\nUser ID: {update.effective_user.id}"
+    )
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(X_CHAT_ID):
@@ -440,5 +444,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("restart", restart))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
-
+    app.add_handler(CommandHandler("chatid", chatid))
     app.run_polling()
