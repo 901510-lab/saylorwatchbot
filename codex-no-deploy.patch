@@ -1,0 +1,814 @@
+diff --git a/.env.example b/.env.example
+new file mode 100644
+index 0000000..7989349
+--- /dev/null
++++ b/.env.example
+@@ -0,0 +1,17 @@
++# Telegram bot token from @BotFather.
++BOT_TOKEN=123456789:replace-with-your-token
++
++# Telegram user/chat id allowed to run admin commands and receive alerts.
++X_CHAT_ID=123456789
++
++# Render provides PORT automatically. Keep this for local testing only.
++PORT=10000
++
++# Optional: how often holdings are checked, in seconds.
++MONITOR_INTERVAL_SECONDS=900
++
++# Optional: enable a Telegram alive ping every 6 hours.
++ENABLE_ALIVE_PING=false
++
++# Optional: custom path for the local holdings baseline file.
++HOLDINGS_STATE_FILE=last_holdings.json
+diff --git a/.gitignore b/.gitignore
+index f8f12d6..df43f10 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,3 +1,6 @@
+ .env
+-_pycache_/
++__pycache__/
++*.py[cod]
+ .venv/
++last_holdings.json
++last_purchase.txt
+diff --git a/Procfile b/Procfile
+index 59951a8..b60679e 100644
+--- a/Procfile
++++ b/Procfile
+@@ -1 +1 @@
+-worker: bash -c "pip install --upgrade pip && pip install inputimeout==1.0.4 && chmod +x start.sh && ./start.sh"
++worker: chmod +x start.sh && ./start.sh
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..1a8e778
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,179 @@
++# SaylorWatchBot
++
++Telegram-бот для мониторинга BTC-холдингов Strategy/MicroStrategy и отправки уведомления, когда баланс BTC увеличился относительно сохранённого baseline.
++
++## Требования
++
++- Python `3.12.x` — Render runtime задан в `runtime.txt`.
++- Telegram bot token из `@BotFather`.
++- Telegram `chat_id`/user id для админ-команд и уведомлений.
++
++## Настройка окружения
++
++1. Скопируйте пример переменных:
++
++   ```bash
++   cp .env.example .env
++   ```
++
++2. Заполните минимум:
++
++   ```env
++   BOT_TOKEN=...
++   X_CHAT_ID=...
++   ```
++
++`BOT_TOKEN` и `X_CHAT_ID` обязательны: приложение валидирует их при запуске и завершится с понятной ошибкой, если они не заданы.
++
++## Установка зависимостей локально
++
++```bash
++python -m pip install -r requirements.txt
++```
++
++Если команда падает с `Tunnel connection failed: 403 Forbidden`, это не ошибка проекта: текущая среда не имеет доступа к PyPI через proxy/tunnel. Лучшие варианты исправления:
++
++- запустить установку на машине/CI с доступом к `https://pypi.org`;
++- настроить корпоративный proxy для `pip` через `HTTPS_PROXY`/`HTTP_PROXY`;
++- использовать внутреннее PyPI-зеркало:
++
++  ```bash
++  python -m pip install -r requirements.txt --index-url https://your-pypi-mirror/simple
++  ```
++
++### Почему pip ставит `apscheduler`, `beautifulsoup4` и другие старые зависимости
++
++Актуальный `requirements.txt` содержит только runtime-зависимости, которые нужны текущему коду:
++
++```text
++python-telegram-bot==20.6
++python-dotenv==1.0.1
++aiohttp==3.9.5
++```
++
++Если `pip install -r requirements.txt` устанавливает `apscheduler`, `requests`, `beautifulsoup4`, `certifi` или `nest_asyncio`, значит локально используется старый `requirements.txt`. Обновите файл из вашей рабочей ветки или удалите лишние строки вручную.
++
++## Локальный запуск
++
++```bash
++python main.py
++```
++
++Или через helper-скрипт:
++
++```bash
++./start.sh
++```
++
++## Деплой и push в GitHub
++
++Ошибка вида:
++
++```text
++fatal: 'origin' does not appear to be a git repository
++```
++
++означает, что в локальном репозитории не настроен remote `origin`. Это исправляется один раз:
++
++```bash
++git remote add origin https://github.com/YOUR_USERNAME/SaylorWatchBot.git
++git push -u origin $(git branch --show-current)
++```
++
++Если remote уже есть, но URL неправильный:
++
++```bash
++git remote set-url origin https://github.com/YOUR_USERNAME/SaylorWatchBot.git
++```
++
++Также можно передать remote URL прямо в deploy-скрипт:
++
++```bash
++GITHUB_REMOTE_URL=https://github.com/YOUR_USERNAME/SaylorWatchBot.git ./deploy.sh
++```
++
++`deploy.sh` пушит текущую ветку, а не жёстко заданную `main`. При необходимости ветку можно указать явно:
++
++```bash
++DEPLOY_BRANCH=main ./deploy.sh
++```
++
++
++
++### Почему deploy.sh пишет про `.env`
++
++Актуальный `deploy.sh` намеренно не добавляет `.env` в git, потому что там хранятся секреты. Если при запуске вы видите сообщение:
++
++```text
++Следующие пути игнорируются одним из ваших файлов .gitignore:
++.env
++```
++
++значит локально запущена старая версия скрипта или в рабочей копии осталась старая строка `git add ... .env`. В актуальной версии при запуске должна быть строка вида:
++
++```text
++🚀 deploy.sh version: 2026-05-14.2
++🧩 Добавляем изменения проекта (без .env)...
++```
++
++Проверьте локальный файл:
++
++```bash
++grep -n "DEPLOY_SCRIPT_VERSION\|git add" deploy.sh
++```
++
++В актуальной версии в списке должен быть `.env.example`, но не `.env`.
++
++Если команда `git checkout origin/main -- README.md .env.example` пишет `pathspec ... did not match`, значит эти новые файлы ещё не попали в ваш `origin/main`. В таком случае сначала сделайте минимальный безопасный ремонт старого `deploy.sh`, чтобы запушить изменения без `.env`:
++
++```bash
++cp deploy.sh deploy.sh.bak
++sed -i 's/git add main.py requirements.txt .env/git add main.py requirements.txt Procfile runtime.txt start.sh deploy.sh .gitignore/g' deploy.sh
++chmod +x deploy.sh
++grep -n "git add" deploy.sh
++```
++
++После `grep` в строке `git add` не должно быть `.env`. Затем можно выполнить деплой:
++
++```bash
++UPDATE_REMOTE_URL=true GITHUB_REMOTE_URL=https://github.com/YOUR_USERNAME/SaylorWatchBot.git ./deploy.sh
++```
++
++Если хотите подтянуть актуальный `deploy.sh` из remote, сначала убедитесь, что он там действительно есть:
++
++```bash
++git fetch origin
++git ls-tree -r --name-only origin/main | grep -E '^(deploy.sh|README.md|.env.example|.gitignore)$'
++```
++
++Если `.env` уже когда-то был добавлен в git index, уберите его из отслеживания без удаления локального файла:
++
++```bash
++git ls-files --error-unmatch .env && git rm --cached .env || echo ".env не отслеживается git — это нормально"
++```
++
++### Если `origin` уже настроен
++
++`GITHUB_REMOTE_URL=... ./deploy.sh` добавляет remote только если `origin` ещё не существует. Если `origin` уже есть, скрипт не меняет его без явного разрешения. Чтобы заменить URL существующего remote:
++
++```bash
++UPDATE_REMOTE_URL=true GITHUB_REMOTE_URL=https://github.com/YOUR_USERNAME/SaylorWatchBot.git ./deploy.sh
++```
++
++Не используйте буквальный `USERNAME` из примера — замените его на ваш GitHub username или organization.
++
++## Security: leaked Telegram tokens
++
++If a Telegram bot token appears in terminal output, screenshots, logs, GitHub issues, chat messages, or deployment logs, treat it as compromised immediately.
++
++1. Open `@BotFather` in Telegram.
++2. Run `/mybots` and select the affected bot.
++3. Choose **API Token** → **Revoke current token**.
++4. Put the new token only in `.env` locally or in your hosting provider's environment variables.
++5. Do not commit `.env` and avoid pasting logs that contain `https://api.telegram.org/bot...` URLs.
++
++The app lowers `httpx` logging noise to reduce accidental Telegram API URL logging, but token rotation is still required after a token was exposed.
++
++## Render
++
++`Procfile` запускает `start.sh`, а `start.sh` запускает `python main.py`. Зависимости должны устанавливаться на build-этапе платформы из `requirements.txt`, а не при каждом старте worker-процесса.
+diff --git a/main.py b/main.py
+index 1123baf..4042a88 100644
+--- a/main.py
++++ b/main.py
+@@ -1,11 +1,16 @@
+-import os
+ import asyncio
+-import logging
+ import datetime
++import json
++import logging
++import os
++from pathlib import Path
++from typing import Any
++
++import aiohttp
++from aiohttp import web
+ from dotenv import load_dotenv
+ from telegram import Bot, Update
+ from telegram.ext import Application, CommandHandler, ContextTypes
+-from aiohttp import web
+ from telegram.request import HTTPXRequest
+ 
+ # === Initialization ===
+@@ -13,10 +18,21 @@ load_dotenv()
+ BOT_TOKEN = os.getenv("BOT_TOKEN")
+ X_CHAT_ID = os.getenv("X_CHAT_ID")
+ PORT = int(os.environ.get("PORT", 10000))
++MONITOR_INTERVAL_SECONDS = int(os.environ.get("MONITOR_INTERVAL_SECONDS", 15 * 60))
++ENABLE_ALIVE_PING = os.environ.get("ENABLE_ALIVE_PING", "false").lower() in {"1", "true", "yes", "on"}
+ 
+ logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s", level=logging.INFO)
+ logger = logging.getLogger(__name__)
++logging.getLogger("httpx").setLevel(logging.WARNING)
+ start_time = datetime.datetime.now()
++last_monitor_check: datetime.datetime | None = None
++last_monitor_error: str | None = None
++
++# === Monitoring configuration ===
++HOLDINGS_STATE_FILE = Path(os.environ.get("HOLDINGS_STATE_FILE", "last_holdings.json"))
++COINGECKO_TREASURY_URL = "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin"
++LEGACY_BITCOIN_TREASURIES_URL = "https://raw.githubusercontent.com/bitcointreasuries/bitcointreasuries.github.io/master/_data/companies.json"
++CHECK_URL = COINGECKO_TREASURY_URL
+ 
+ 
+ def write_log(msg: str):
+@@ -24,73 +40,194 @@ def write_log(msg: str):
+     logger.info(msg)
+ 
+ 
+-# === Commands ===
+-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+-    import aiohttp
++def validate_required_env() -> None:
++    missing = []
++    if not BOT_TOKEN:
++        missing.append("BOT_TOKEN")
++    if not X_CHAT_ID:
++        missing.append("X_CHAT_ID")
++
++    if missing:
++        raise RuntimeError(f"Missing required environment variable(s): {', '.join(missing)}")
+ 
+-    uptime = datetime.datetime.now() - start_time
+-    status_msg = f"✅ Bot online\n⏱ Uptime: {uptime}\n"
+ 
+-    last_info = "📊 No recent purchase detected yet (waiting for update)."
+-    btc_balance_info = "⚠️ Failed to fetch MicroStrategy BTC balance"
++def parse_number(value: Any) -> float:
++    if value is None:
++        return 0.0
++    if isinstance(value, int | float):
++        return float(value)
++    cleaned = str(value).replace(",", "").replace("$", "").strip()
++    if not cleaned:
++        return 0.0
++    return float(cleaned)
++
++
++def format_btc(value: float) -> str:
++    return f"{value:,.2f}".rstrip("0").rstrip(".")
++
++
++def format_usd(value: float) -> str:
++    return f"${value:,.0f}"
++
++
++def is_strategy_company(name: str) -> bool:
++    normalized = name.lower()
++    return "microstrategy" in normalized or normalized == "strategy" or "strategy inc" in normalized
++
++
++def load_holdings_state() -> dict[str, Any] | None:
++    if not HOLDINGS_STATE_FILE.exists():
++        return None
+ 
+-    # === Primary source: CoinGecko ===
+     try:
+-        async with aiohttp.ClientSession() as s:
+-            async with s.get(
+-                "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin",
+-                timeout=aiohttp.ClientTimeout(total=10)
+-            ) as r:
+-                if r.status == 200:
+-                    data = await r.json()
+-                    for c in data.get("companies", []):
+-                        if "MicroStrategy" in c.get("name", ""):
+-                            btc = float(c.get("total_holdings", 0))
+-                            usd = c.get("total_current_value_usd", "0")
+-                            avg_price = c.get("total_entry_value_usd", "0")
+-                            btc_balance_info = (
+-                                f"🏢 MicroStrategy — Bitcoin Holdings\n"
+-                                f"💰 {btc} BTC (~${usd})\n"
+-                                f"📈 Entry value: ${avg_price}\n"
+-                                f"🟢 Data via CoinGecko"
+-                            )
+-                            last_info = "📅 Latest data fetched from CoinGecko"                        
+-                            break
+-                else:
+-                    raise Exception(f"CoinGecko API response: {r.status}")
+-    except Exception as e:
+-        write_log(f"⚠️ CoinGecko error: {e}")
+-        # === Fallback source: GitHub (Bitcointreasuries) ===
+-        try:
+-            async with aiohttp.ClientSession() as s:
+-                async with s.get(
+-                    "https://raw.githubusercontent.com/bitcointreasuries/bitcointreasuries.github.io/master/_data/companies.json",
+-                    timeout=aiohttp.ClientTimeout(total=10)
+-                ) as r2:
+-                    if r2.status == 200:
+-                        data2 = await r2.json()
+-                        for c in data2:
+-                            if "MicroStrategy" in c.get("name", ""):
+-                                btc = c.get("bitcoin", "0")
+-                                usd = c.get("usd_value", "0")
+-                                price = c.get("btc_price", "0")
+-                                btc_balance_info = (
+-                                    f"🏢 MicroStrategy — Bitcoin Holdings\n"
+-                                    f"💰 {btc} BTC (~${usd})\n"
+-                                    f"📈 Avg buy price: ${price}\n"
+-                                    f"🟡 Data via GitHub/Bitcointreasuries"
+-                                )
+-                                last_info = "📅 Fallback data used (CoinGecko unavailable)"
+-                                break
+-                    else:
+-                        btc_balance_info = f"⚠️ Fallback API response: {r2.status}"
+-        except Exception as e2:
+-            btc_balance_info = f"⚠️ Fallback fetch error: {type(e2).__name__}"
++        return json.loads(HOLDINGS_STATE_FILE.read_text())
++    except json.JSONDecodeError:
++        logger.warning("Invalid holdings state file: %s", HOLDINGS_STATE_FILE)
++        return None
++    except OSError:
++        logger.exception("Failed to read holdings state file: %s", HOLDINGS_STATE_FILE)
++        return None
++
++
++def save_holdings_state(holdings: dict[str, Any]) -> None:
++    state = {
++        "name": holdings["name"],
++        "btc": holdings["btc"],
++        "usd": holdings.get("usd", 0.0),
++        "source": holdings.get("source", CHECK_URL),
++        "updated_at": datetime.datetime.now(datetime.UTC).isoformat(),
++    }
++    HOLDINGS_STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True))
++
++
++def track_background_task(application: Application, coro, name: str) -> None:
++    task = asyncio.create_task(coro, name=name)
++    application.bot_data.setdefault("background_tasks", set()).add(task)
++    task.add_done_callback(application.bot_data["background_tasks"].discard)
++
++
++async def fetch_json(url: str, timeout_seconds: int = 20) -> Any | None:
++    headers = {"User-Agent": "SaylorWatchBot/1.0"}
++    async with aiohttp.ClientSession(headers=headers) as session:
++        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout_seconds)) as resp:
++            if resp.status != 200:
++                write_log(f"⚠️ API response from {url}: {resp.status}")
++                return None
++            return await resp.json()
++
++
++async def fetch_strategy_holdings_from_legacy_json() -> dict[str, Any] | None:
++    try:
++        data = await fetch_json(LEGACY_BITCOIN_TREASURIES_URL)
++    except Exception as exc:
++        logger.exception("Failed to fetch legacy Bitcointreasuries holdings")
++        write_log(f"⚠️ Legacy Bitcointreasuries network error: {type(exc).__name__}: {exc}")
++        return None
++
++    if data is None:
++        return None
++
++    if not isinstance(data, list):
++        write_log("⚠️ Unexpected legacy holdings payload: expected a list")
++        return None
++
++    for company in data:
++        if not isinstance(company, dict):
++            continue
++
++        name = str(company.get("name", ""))
++        if is_strategy_company(name):
++            try:
++                return {
++                    "name": name,
++                    "btc": parse_number(company.get("bitcoin", 0)),
++                    "usd": parse_number(company.get("usd_value", 0)),
++                    "source": LEGACY_BITCOIN_TREASURIES_URL,
++                }
++            except ValueError as exc:
++                write_log(f"⚠️ Invalid numeric legacy holdings data for {name}: {exc}")
++                return None
++
++    write_log("⚠️ Strategy/MicroStrategy record not found in legacy holdings payload")
++    return None
++
++
++async def fetch_coingecko_holdings() -> dict[str, Any] | None:
++    try:
++        data = await fetch_json(COINGECKO_TREASURY_URL, timeout_seconds=10)
++    except Exception as exc:
++        write_log(f"⚠️ CoinGecko error: {type(exc).__name__}: {exc}")
++        return None
++
++    if not isinstance(data, dict):
++        return None
++
++    for company in data.get("companies", []):
++        if not isinstance(company, dict):
++            continue
++        name = str(company.get("name", ""))
++        if is_strategy_company(name):
++            try:
++                return {
++                    "name": name,
++                    "btc": parse_number(company.get("total_holdings", 0)),
++                    "usd": parse_number(company.get("total_current_value_usd", 0)),
++                    "entry_value_usd": parse_number(company.get("total_entry_value_usd", 0)),
++                    "source": COINGECKO_TREASURY_URL,
++                }
++            except ValueError as exc:
++                write_log(f"⚠️ Invalid CoinGecko data for {name}: {exc}")
++                return None
++
++    write_log("⚠️ Strategy/MicroStrategy record not found in CoinGecko payload")
++    return None
++
++
++async def fetch_strategy_holdings() -> dict[str, Any] | None:
++    holdings = await fetch_coingecko_holdings()
++    if holdings:
++        return holdings
++
++    return await fetch_strategy_holdings_from_legacy_json()
++
++
++# === Commands ===
++async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
++    uptime = datetime.datetime.now() - start_time
++    holdings = await fetch_strategy_holdings()
++
++    if holdings:
++        source_label = "CoinGecko" if holdings.get("source") == COINGECKO_TREASURY_URL else "GitHub/Bitcointreasuries"
++        entry_value = holdings.get("entry_value_usd")
++        entry_line = f"\n📈 Entry value: {format_usd(entry_value)}" if entry_value else ""
++        btc_balance_info = (
++            f"🏢 {holdings['name']} — Bitcoin Holdings\n"
++            f"💰 {format_btc(holdings['btc'])} BTC (~{format_usd(holdings.get('usd', 0.0))})"
++            f"{entry_line}\n"
++            f"🟢 Data via {source_label}"
++        )
++    else:
++        btc_balance_info = "⚠️ Failed to fetch Strategy/MicroStrategy BTC balance"
++
++    state = load_holdings_state()
++    state_info = "📊 Monitoring baseline: not recorded yet"
++    if state:
++        state_info = (
++            f"📊 Monitoring baseline: {format_btc(parse_number(state.get('btc', 0)))} BTC "
++            f"at {state.get('updated_at', 'unknown time')}"
++        )
++
++    monitor_lines = [state_info]
++    if last_monitor_check:
++        monitor_lines.append(f"🕵️ Last monitor check: {last_monitor_check:%Y-%m-%d %H:%M:%S}")
++    if last_monitor_error:
++        monitor_lines.append(f"⚠️ Last monitor error: {last_monitor_error}")
+ 
+     msg = (
+-        f"{status_msg}\n"
+-        f"{last_info}\n"
++        f"✅ Bot online\n"
++        f"⏱ Uptime: {uptime}\n\n"
+         f"{btc_balance_info}\n"
++        f"{'\n'.join(monitor_lines)}\n"
+         f"🌐 Monitoring: {CHECK_URL}"
+     )
+ 
+@@ -106,7 +243,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+     help_text = (
+         "📖 *Commands:*\n"
+         "/start — check bot status\n"
+-        "/status — show uptime and system info\n"
++        "/status — show uptime, holdings, and monitor info\n"
+         "/uptime — show uptime\n"
+         "/info — system details\n"
+         "/site — show monitored site\n"
+@@ -122,12 +259,14 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+         return
+     commit = os.getenv("RENDER_GIT_COMMIT", "N/A")
+     instance = os.getenv("RENDER_INSTANCE_ID", "N/A")
+-    uptime = datetime.datetime.now() - start_time
++    uptime_value = datetime.datetime.now() - start_time
+     msg = (
+         f"🧠 *Bot Information:*\n"
+         f"Commit: `{commit}`\n"
+         f"Instance: `{instance}`\n"
+-        f"Uptime: {uptime}\n"
++        f"Uptime: {uptime_value}\n"
++        f"Monitor interval: {MONITOR_INTERVAL_SECONDS}s\n"
++        f"Alive ping enabled: {ENABLE_ALIVE_PING}\n"
+         f"Server Time: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
+     )
+     await update.message.reply_text(msg, parse_mode="Markdown")
+@@ -158,11 +297,20 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+                 await bot.delete_message(chat_id, msg_id)
+                 deleted += 1
+                 await asyncio.sleep(0.1)
+-            except Exception:
+-                pass
++            except Exception as exc:
++                logger.debug("Failed to delete message %s: %s", msg_id, exc)
+         await update.message.reply_text(f"🧹 Deleted messages: {deleted}")
+-    except Exception as e:
+-        await update.message.reply_text(f"⚠️ Error clearing messages: {e}")
++    except Exception as exc:
++        logger.exception("Failed to clear messages")
++        await update.message.reply_text(f"⚠️ Error clearing messages: {exc}")
++
++
++async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
++    await update.message.reply_text(
++        "🌐 Monitored sources:\n"
++        f"Primary: {COINGECKO_TREASURY_URL}\n"
++        f"Fallback: {LEGACY_BITCOIN_TREASURIES_URL}"
++    )
+ 
+ 
+ # === Health check ===
+@@ -175,129 +323,116 @@ async def start_healthcheck_server():
+     app.add_routes([web.get("/", handle)])
+     runner = web.AppRunner(app)
+     await runner.setup()
+-    site = web.TCPSite(runner, "0.0.0.0", PORT)
+-    await site.start()
+-    write_log(f"🌐 Health-check server started on port {PORT}")
+-
+-
+-# === Monitoring ===
+-LAST_PURCHASE_FILE = "last_purchase.txt"
+-CHECK_URL = "https://raw.githubusercontent.com/bitcointreasuries/bitcointreasuries.github.io/master/_data/companies.json"
+-
+-async def fetch_latest_purchase():
+-    import aiohttp
+-
+-    headers = {"User-Agent": "Mozilla/5.0"}
+ 
+     try:
+-        async with aiohttp.ClientSession(headers=headers) as session:
+-            async with session.get(CHECK_URL, timeout=20) as resp:
+-                if resp.status != 200:
+-                    write_log(f"⚠️ API response: {resp.status}")
+-                    return None
+-
+-                data = await resp.json()
+-
+-    except Exception as e:
+-        write_log(f"⚠️ Network error: {e}")
+-        return None
+-
+-    # ищем Strategy / MicroStrategy
+-    for company in data:
+-        name = company.get("name", "")
+-
+-        if "MicroStrategy" in name or "Strategy" in name:
+-            btc = float(company.get("bitcoin", 0))
+-            usd = company.get("usd_value", 0)
+-
+-            return {
+-                "name": name,
+-                "btc": btc,
+-                "usd": usd
+-            }
+-
+-    return None
+-
+-    soup = BeautifulSoup(html, "html.parser")
+-    table = soup.find("table")
+-    if not table:
+-        return None
+-    rows = table.find_all("tr")
+-    if len(rows) < 2:
+-        return None
+-    cells = [c.get_text(strip=True) for c in rows[1].find_all("td")]
+-    if len(cells) < 4:
+-        return None
+-    date, amount, price, total = cells[0], cells[1], cells[2], cells[3]
+-    return {"date": date, "amount": amount, "price": price, "total": total}
++        site = web.TCPSite(runner, "0.0.0.0", PORT)
++        await site.start()
++        write_log(f"🌐 Health-check server started on port {PORT}")
++        await asyncio.Event().wait()
++    finally:
++        await runner.cleanup()
++        write_log("🧹 Health-check server stopped")
+ 
+ 
+ async def monitor_saylor_purchases(bot: Bot):
+-    last_date = None
+-    if os.path.exists(LAST_PURCHASE_FILE):
+-        with open(LAST_PURCHASE_FILE, "r") as f:
+-            last_date = f.read().strip()
+-    write_log(f"🕵️ Monitoring {CHECK_URL}")
++    global last_monitor_check, last_monitor_error
++
++    write_log(f"🕵️ Monitoring {COINGECKO_TREASURY_URL} with legacy fallback")
+     while True:
+         try:
+-            purchase = await fetch_latest_purchase()
+-            if purchase and purchase["date"] != last_date:
+-                msg = (
+-                    f"💰 *MicroStrategy bought Bitcoin!*\n"
+-                    f"📅 Date: {purchase['date']}\n"
+-                    f"₿ Amount: {purchase['amount']}\n"
+-                    f"💵 Total: {purchase['total']}\n"
+-                    f"🌐 Source: {CHECK_URL}"
+-                )
+-                await bot.send_message(chat_id=X_CHAT_ID, text=msg, parse_mode="Markdown")
+-                last_date = purchase["date"]
+-                with open(LAST_PURCHASE_FILE, "w") as f:
+-                    f.write(last_date)
++            last_monitor_check = datetime.datetime.now()
++            holdings = await fetch_strategy_holdings()
++            if not holdings:
++                last_monitor_error = "Unable to fetch holdings"
+             else:
+-                write_log("ℹ️ Checked — no updates.")
+-        except Exception as e:
+-            write_log(f"⚠️ Monitoring error: {e}")
+-        await asyncio.sleep(15 * 60)
++                previous = load_holdings_state()
++                previous_btc = parse_number(previous.get("btc", 0)) if previous else None
++                current_btc = holdings["btc"]
++                last_monitor_error = None
++
++                if previous_btc is None:
++                    save_holdings_state(holdings)
++                    write_log(f"📊 Initial holdings baseline saved: {format_btc(current_btc)} BTC")
++                elif current_btc > previous_btc:
++                    delta = current_btc - previous_btc
++                    msg = (
++                        "💰 Strategy/MicroStrategy BTC holdings increased!\n"
++                        f"₿ Previous: {format_btc(previous_btc)} BTC\n"
++                        f"₿ Current: {format_btc(current_btc)} BTC\n"
++                        f"➕ Change: {format_btc(delta)} BTC\n"
++                        f"💵 Current value: {format_usd(holdings.get('usd', 0.0))}\n"
++                        f"🌐 Source: {holdings.get('source', CHECK_URL)}"
++                    )
++                    await bot.send_message(chat_id=X_CHAT_ID, text=msg)
++                    save_holdings_state(holdings)
++                    write_log(f"🚨 Holdings increase detected: +{format_btc(delta)} BTC")
++                elif current_btc != previous_btc:
++                    save_holdings_state(holdings)
++                    write_log(
++                        f"📉 Holdings changed without increase: {format_btc(previous_btc)} -> "
++                        f"{format_btc(current_btc)} BTC"
++                    )
++                else:
++                    write_log("ℹ️ Checked — no updates.")
++        except Exception as exc:
++            last_monitor_error = f"{type(exc).__name__}: {exc}"
++            logger.exception("Monitoring error")
++            write_log(f"⚠️ Monitoring error: {last_monitor_error}")
++
++        await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
+ 
+ 
+ async def ping_alive(bot: Bot):
+     while True:
+         await asyncio.sleep(6 * 60 * 60)
+-        uptime = datetime.datetime.now() - start_time
++        uptime_value = datetime.datetime.now() - start_time
+         try:
+-            await bot.send_message(chat_id=X_CHAT_ID, text=f"✅ Still alive (uptime: {uptime})")
+-        except Exception as e:
+-            write_log(f"⚠️ Auto-ping error: {e}")
++            await bot.send_message(chat_id=X_CHAT_ID, text=f"✅ Still alive (uptime: {uptime_value})")
++        except Exception as exc:
++            logger.exception("Auto-ping error")
++            write_log(f"⚠️ Auto-ping error: {exc}")
+ 
+ 
+ async def _post_init(application: Application):
+     try:
+         await application.bot.delete_webhook(drop_pending_updates=True)
+         write_log("🧹 Telegram webhook and polling sessions cleared (post_init)")
+-    except Exception as e:
+-        write_log(f"⚠️ Polling clear error: {e}")
++    except Exception as exc:
++        logger.exception("Polling clear error")
++        write_log(f"⚠️ Polling clear error: {exc}")
+ 
+-    application.create_task(start_healthcheck_server())
+-    application.create_task(monitor_saylor_purchases(application.bot))
+-    application.create_task(ping_alive(application.bot))
++    track_background_task(application, start_healthcheck_server(), "healthcheck-server")
++    track_background_task(application, monitor_saylor_purchases(application.bot), "holdings-monitor")
++    if ENABLE_ALIVE_PING:
++        track_background_task(application, ping_alive(application.bot), "alive-ping")
+ 
+     write_log("🧩 post_init complete")
+ 
+ 
+-async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
+-    await update.message.reply_text(f"🌐 Monitored website:\n{CHECK_URL}")
++async def _post_shutdown(application: Application):
++    tasks = application.bot_data.get("background_tasks", set())
++    for task in tasks:
++        task.cancel()
++
++    if tasks:
++        await asyncio.gather(*tasks, return_exceptions=True)
++        write_log("🧹 Background tasks stopped")
+ 
+ 
+ if __name__ == "__main__":
++    validate_required_env()
++
+     request = HTTPXRequest(connection_pool_size=50, read_timeout=30, write_timeout=30)
+     app = (
+         Application.builder()
+         .token(BOT_TOKEN)
+         .request(request)
+         .post_init(_post_init)
++        .post_shutdown(_post_shutdown)
+         .build()
+     )
+ 
++    app.add_handler(CommandHandler("start", status))
+     app.add_handler(CommandHandler("status", status))
+     app.add_handler(CommandHandler("uptime", uptime))
+     app.add_handler(CommandHandler("help", help_command))
+@@ -306,4 +441,4 @@ if __name__ == "__main__":
+     app.add_handler(CommandHandler("clear", clear))
+     app.add_handler(CommandHandler("site", site))
+ 
+-    asyncio.run(app.run_polling())
++    app.run_polling()
+diff --git a/requirements.txt b/requirements.txt
+index b8c7ee8..56ac5fa 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,8 +1,3 @@
+ python-telegram-bot==20.6
+-apscheduler>=3.10.4
+-requests>=2.31.0
+ python-dotenv==1.0.1
+ aiohttp==3.9.5
+-beautifulsoup4==4.12.3
+-certifi>=2023.7.22
+-nest_asyncio==1.6.0
+diff --git a/start.sh b/start.sh
+index 9632a70..d3b1249 100755
+--- a/start.sh
++++ b/start.sh
+@@ -1,8 +1,5 @@
+ #!/usr/bin/env bash
+ set -e
+ 
+-echo "Installing missing dependencies..."
+-pip install --no-cache-dir inputimeout==1.0.4
+-
+ echo "Starting SaylorWatchBot..."
+ python main.py
