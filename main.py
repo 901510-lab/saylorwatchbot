@@ -228,7 +228,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏱ Uptime: {uptime}\n\n"
         f"{btc_balance_info}\n"
         f"{'\n'.join(monitor_lines)}\n"
-        f"🌐 Monitoring: {CHECK_URL}"
     )
 
     await update.message.reply_text(msg)
