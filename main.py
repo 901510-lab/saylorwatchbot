@@ -68,10 +68,9 @@ def is_admin(user_id: int | None, chat_id: int | None = None) -> bool:
 async def deny_admin(update: Update) -> None:
     await update.message.reply_text(
         "⛔ Команда только для админа.\n"
-        f"Ваш User ID: `{update.effective_user.id}`\n"
-        f"X_CHAT_ID на сервере: `{X_CHAT_ID}`\n"
-        "Они должны совпадать. Узнайте ID: /chatid",
-        parse_mode="Markdown",
+        f"Ваш User ID: {update.effective_user.id}\n"
+        f"X_CHAT_ID на сервере: {X_CHAT_ID}\n"
+        "Они должны совпадать. Узнайте ID: /chatid"
     )
 
 
@@ -335,11 +334,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Для X_CHAT_ID на хостинге используйте:\n"
-        f"Chat ID: `{update.effective_chat.id}`\n"
-        f"User ID: `{update.effective_user.id}`\n\n"
+        f"Chat ID: {update.effective_chat.id}\n"
+        f"User ID: {update.effective_user.id}\n\n"
         "Обычно в личке с ботом оба совпадают. "
-        "Не подставляйте ID самого бота.",
-        parse_mode="Markdown",
+        "Не подставляйте ID самого бота."
     )
 
 
@@ -353,11 +351,12 @@ async def testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Тест: уведомления доходят. Мониторинг закупок и продаж включён.",
         )
         await update.message.reply_text(
-            f"Тестовый алерт отправлен в chat_id `{alert_chat_id()}`.",
-            parse_mode="Markdown",
+            f"✅ Тестовый алерт отправлен в Chat ID {alert_chat_id()}."
         )
     except Exception as exc:
-        await update.message.reply_text(f"Ошибка: {exc}\nПроверьте /chatid и X_CHAT_ID.")
+        await update.message.reply_text(
+            f"❌ Ошибка отправки: {exc}\nПроверьте /chatid и переменную X_CHAT_ID на хостинге."
+        )
 
 
 async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
