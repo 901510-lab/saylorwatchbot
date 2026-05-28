@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 last_holdings.json
 last_purchase.txt
+bitcoin.json

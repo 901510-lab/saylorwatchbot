@@ -20,6 +20,7 @@ X_CHAT_ID = os.getenv("X_CHAT_ID")
 PORT = int(os.environ.get("PORT", 10000))
 MONITOR_INTERVAL_SECONDS = int(os.environ.get("MONITOR_INTERVAL_SECONDS", 15 * 60))
 ENABLE_ALIVE_PING = os.environ.get("ENABLE_ALIVE_PING", "false").lower() in {"1", "true", "yes", "on"}
+MIN_BTC_CHANGE = float(os.environ.get("MIN_BTC_CHANGE", "1"))
 
 logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,6 +50,26 @@ def validate_required_env() -> None:
 
     if missing:
         raise RuntimeError(f"Missing required environment variable(s): {', '.join(missing)}")
+
+
+def alert_chat_id() -> int:
+    return int(str(X_CHAT_ID).strip())
+
+
+def is_admin(user_id: int | None) -> bool:
+    if user_id is None:
+        return False
+    return str(user_id) == str(X_CHAT_ID).strip()
+
+
+async def validate_alert_target(bot: Bot) -> None:
+    target = alert_chat_id()
+    me = await bot.get_me()
+    if target == me.id:
+        raise RuntimeError(
+            "X_CHAT_ID совпадает с ID бота. Укажите ваш личный chat id: напишите боту /chatid "
+            "и поставьте это число в X_CHAT_ID на хостинге."
+        )
 
 
 def parse_number(value: Any) -> float:
@@ -191,44 +212,88 @@ async def fetch_strategy_holdings() -> dict[str, Any] | None:
     return await fetch_strategy_holdings_from_legacy_json()
 
 
+def format_holdings_alert(previous_btc: float, holdings: dict[str, Any], delta: float, increased: bool) -> str:
+    action = "закупка" if increased else "продажа"
+    sign = "+" if increased else "−"
+    return (
+        f"{'💰' if increased else '📉'} Strategy — {action} BTC\n"
+        f"Было: {format_btc(previous_btc)} BTC\n"
+        f"Сейчас: {format_btc(holdings['btc'])} BTC\n"
+        f"Изменение: {sign}{format_btc(abs(delta))} BTC\n"
+        f"Оценка: {format_usd(holdings.get('usd', 0.0))}"
+    )
+
+
+async def send_holdings_alert(bot: Bot, text: str) -> None:
+    await bot.send_message(chat_id=alert_chat_id(), text=text)
+
+
+async def run_holdings_check(bot: Bot) -> str | None:
+    """One monitoring cycle. Returns error text or None on success."""
+    global last_monitor_check, last_monitor_error
+
+    last_monitor_check = datetime.datetime.now()
+    holdings = await fetch_strategy_holdings()
+    if not holdings:
+        last_monitor_error = "Не удалось получить данные CoinGecko"
+        return last_monitor_error
+
+    previous = load_holdings_state()
+    previous_btc = parse_number(previous.get("btc", 0)) if previous else None
+    current_btc = holdings["btc"]
+    last_monitor_error = None
+
+    if previous_btc is None:
+        save_holdings_state(holdings)
+        write_log(f"📊 Baseline сохранён: {format_btc(current_btc)} BTC")
+        return None
+
+    delta = current_btc - previous_btc
+    if abs(delta) < MIN_BTC_CHANGE:
+        write_log("ℹ️ Проверка — без значимых изменений.")
+        return None
+
+    if delta > 0:
+        await send_holdings_alert(bot, format_holdings_alert(previous_btc, holdings, delta, increased=True))
+        save_holdings_state(holdings)
+        write_log(f"🚨 Закупка: +{format_btc(delta)} BTC")
+        return None
+
+    await send_holdings_alert(bot, format_holdings_alert(previous_btc, holdings, delta, increased=False))
+    save_holdings_state(holdings)
+    write_log(f"🚨 Продажа: {format_btc(delta)} BTC")
+    return None
+
+
 # === Commands ===
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uptime = datetime.datetime.now() - start_time
     holdings = await fetch_strategy_holdings()
 
     if holdings:
-        source_label = "CoinGecko" if holdings.get("source") == COINGECKO_TREASURY_URL else "GitHub/Bitcointreasuries"
-        entry_value = holdings.get("entry_value_usd")
-        entry_line = f"\n📈 Entry value: {format_usd(entry_value)}" if entry_value else ""
         btc_balance_info = (
-            f"🏢 {holdings['name']} — Bitcoin Holdings\n"
+            f"🏢 {holdings['name']}\n"
             f"💰 {format_btc(holdings['btc'])} BTC (~{format_usd(holdings.get('usd', 0.0))})"
-            f"{entry_line}\n"
-            f"🟢 Data via {source_label}"
         )
     else:
-        btc_balance_info = "⚠️ Failed to fetch Strategy/MicroStrategy BTC balance"
+        btc_balance_info = "⚠️ Не удалось получить баланс Strategy"
 
     state = load_holdings_state()
-    state_info = "📊 Monitoring baseline: not recorded yet"
     if state:
-        state_info = (
-            f"📊 Monitoring baseline: {format_btc(parse_number(state.get('btc', 0)))} BTC "
-            f"at {state.get('updated_at', 'unknown time')}"
-        )
-
-    monitor_lines = [state_info]
-    if last_monitor_check:
-        monitor_lines.append(f"🕵️ Last monitor check: {last_monitor_check:%Y-%m-%d %H:%M:%S}")
-    if last_monitor_error:
-        monitor_lines.append(f"⚠️ Last monitor error: {last_monitor_error}")
+        baseline_btc = format_btc(parse_number(state.get("btc", 0)))
+        baseline_line = f"📊 Baseline для алертов: {baseline_btc} BTC"
+    else:
+        baseline_line = "📊 Baseline ещё не задан (после первой проверки)"
 
     msg = (
-        f"✅ Bot online\n"
+        f"✅ Бот онлайн\n"
         f"⏱ Uptime: {uptime}\n\n"
         f"{btc_balance_info}\n"
-        f"{'\n'.join(monitor_lines)}\n"
+        f"{baseline_line}"
     )
+
+    if is_admin(update.effective_user.id) and last_monitor_error:
+        msg += f"\n\n⚠️ Ошибка мониторинга: {last_monitor_error}"
 
     await update.message.reply_text(msg)
 
@@ -240,24 +305,89 @@ async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "📖 *Commands:*\n"
-        "/start — check bot status\n"
-        "/status — show uptime, holdings, and monitor info\n"
-        "/uptime — show uptime\n"
-        "/info — system details\n"
-        "/site — show monitored site\n"
-        "/clear — delete recent bot messages\n"
-        "/restart — restart Render instance (admin only)\n"
+        "📖 *Команды:*\n"
+        "/start, /status — баланс Strategy и baseline\n"
+        "/chatid — ваш ID для X_CHAT_ID\n"
+        "/check — проверить изменения сейчас (админ)\n"
+        "/testalert — тест уведомления (админ)\n"
+        "/setbaseline — задать baseline вручную (админ)\n"
+        "/uptime, /info, /clear, /restart"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
+
 async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"Chat ID: {update.effective_chat.id}\nUser ID: {update.effective_user.id}"
+        "Для X_CHAT_ID на хостинге используйте:\n"
+        f"Chat ID: `{update.effective_chat.id}`\n"
+        f"User ID: `{update.effective_user.id}`\n\n"
+        "Обычно в личке с ботом оба совпадают. "
+        "Не подставляйте ID самого бота.",
+        parse_mode="Markdown",
     )
 
+
+async def testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Только для админа (X_CHAT_ID).")
+        return
+    try:
+        await send_holdings_alert(
+            context.bot,
+            "✅ Тест: уведомления доходят. Мониторинг закупок и продаж включён.",
+        )
+        await update.message.reply_text("Сообщение отправлено.")
+    except Exception as exc:
+        await update.message.reply_text(f"Ошибка: {exc}\nПроверьте /chatid и X_CHAT_ID.")
+
+
+async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Только для админа.")
+        return
+    await update.message.reply_text("Проверяю CoinGecko…")
+    err = await run_holdings_check(context.bot)
+    if err:
+        await update.message.reply_text(f"Проверка не удалась: {err}")
+    else:
+        await update.message.reply_text("Проверка выполнена. Если был значимый сдвиг — пришлю алерт.")
+
+
+async def setbaseline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Только для админа.")
+        return
+
+    if not context.args:
+        holdings = await fetch_strategy_holdings()
+        if not holdings:
+            await update.message.reply_text(
+                "Использование:\n"
+                "/setbaseline — baseline = текущий баланс с CoinGecko\n"
+                "/setbaseline 800000 — baseline = 800000 BTC (для теста)"
+            )
+            return
+        save_holdings_state(holdings)
+        await update.message.reply_text(
+            f"Baseline = текущий баланс: {format_btc(holdings['btc'])} BTC"
+        )
+        return
+
+    try:
+        btc = parse_number(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Укажите число BTC, например: /setbaseline 800000")
+        return
+
+    save_holdings_state({"name": "Strategy", "btc": btc, "usd": 0.0, "source": "manual"})
+    await update.message.reply_text(
+        f"Baseline задан: {format_btc(btc)} BTC.\n"
+        f"Следующая /check сравнит с CoinGecko (порог {MIN_BTC_CHANGE} BTC)."
+    )
+
+
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != str(X_CHAT_ID):
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ Access denied.")
         return
     commit = os.getenv("RENDER_GIT_COMMIT", "N/A")
@@ -276,7 +406,7 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != str(X_CHAT_ID):
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ Access denied.")
         return
     await update.message.reply_text("🔄 Restarting Render instance...")
@@ -285,7 +415,7 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Deletes recent bot messages"""
-    if str(update.effective_user.id) != str(X_CHAT_ID):
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ Access denied.")
         return
 
@@ -310,9 +440,8 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🌐 Monitored sources:\n"
-        f"Primary: {COINGECKO_TREASURY_URL}\n"
-        f"Fallback: {LEGACY_BITCOIN_TREASURIES_URL}"
+        "Источник: CoinGecko (treasury Strategy/MicroStrategy), "
+        "резерв — Bitcointreasuries."
     )
 
 
@@ -338,45 +467,10 @@ async def start_healthcheck_server():
 
 
 async def monitor_saylor_purchases(bot: Bot):
-    global last_monitor_check, last_monitor_error
-
-    write_log(f"🕵️ Monitoring {COINGECKO_TREASURY_URL} with legacy fallback")
+    write_log("🕵️ Мониторинг Strategy (CoinGecko + fallback)")
     while True:
         try:
-            last_monitor_check = datetime.datetime.now()
-            holdings = await fetch_strategy_holdings()
-            if not holdings:
-                last_monitor_error = "Unable to fetch holdings"
-            else:
-                previous = load_holdings_state()
-                previous_btc = parse_number(previous.get("btc", 0)) if previous else None
-                current_btc = holdings["btc"]
-                last_monitor_error = None
-
-                if previous_btc is None:
-                    save_holdings_state(holdings)
-                    write_log(f"📊 Initial holdings baseline saved: {format_btc(current_btc)} BTC")
-                elif current_btc > previous_btc:
-                    delta = current_btc - previous_btc
-                    msg = (
-                        "💰 Strategy/MicroStrategy BTC holdings increased!\n"
-                        f"₿ Previous: {format_btc(previous_btc)} BTC\n"
-                        f"₿ Current: {format_btc(current_btc)} BTC\n"
-                        f"➕ Change: {format_btc(delta)} BTC\n"
-                        f"💵 Current value: {format_usd(holdings.get('usd', 0.0))}\n"
-                        f"🌐 Source: {holdings.get('source', CHECK_URL)}"
-                    )
-                    await bot.send_message(chat_id=X_CHAT_ID, text=msg)
-                    save_holdings_state(holdings)
-                    write_log(f"🚨 Holdings increase detected: +{format_btc(delta)} BTC")
-                elif current_btc != previous_btc:
-                    save_holdings_state(holdings)
-                    write_log(
-                        f"📉 Holdings changed without increase: {format_btc(previous_btc)} -> "
-                        f"{format_btc(current_btc)} BTC"
-                    )
-                else:
-                    write_log("ℹ️ Checked — no updates.")
+            await run_holdings_check(bot)
         except Exception as exc:
             last_monitor_error = f"{type(exc).__name__}: {exc}"
             logger.exception("Monitoring error")
@@ -390,7 +484,7 @@ async def ping_alive(bot: Bot):
         await asyncio.sleep(6 * 60 * 60)
         uptime_value = datetime.datetime.now() - start_time
         try:
-            await bot.send_message(chat_id=X_CHAT_ID, text=f"✅ Still alive (uptime: {uptime_value})")
+            await bot.send_message(chat_id=alert_chat_id(), text=f"✅ Still alive (uptime: {uptime_value})")
         except Exception as exc:
             logger.exception("Auto-ping error")
             write_log(f"⚠️ Auto-ping error: {exc}")
@@ -403,6 +497,8 @@ async def _post_init(application: Application):
     except Exception as exc:
         logger.exception("Polling clear error")
         write_log(f"⚠️ Polling clear error: {exc}")
+
+    await validate_alert_target(application.bot)
 
     track_background_task(application, start_healthcheck_server(), "healthcheck-server")
     track_background_task(application, monitor_saylor_purchases(application.bot), "holdings-monitor")
@@ -444,4 +540,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("site", site))
     app.add_handler(CommandHandler("chatid", chatid))
+    app.add_handler(CommandHandler("testalert", testalert))
+    app.add_handler(CommandHandler("check", check_now))
+    app.add_handler(CommandHandler("setbaseline", setbaseline))
     app.run_polling()
