@@ -9,9 +9,11 @@ from typing import Any
 import aiohttp
 from aiohttp import web
 from dotenv import load_dotenv
-from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Bot, BotCommand, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
+
+BOT_VERSION = "2026-05-24.2"
 
 # === Initialization ===
 load_dotenv()
@@ -34,6 +36,37 @@ HOLDINGS_STATE_FILE = Path(os.environ.get("HOLDINGS_STATE_FILE", "last_holdings.
 COINGECKO_TREASURY_URL = "https://api.coingecko.com/api/v3/companies/public_treasury/bitcoin"
 LEGACY_BITCOIN_TREASURIES_URL = "https://raw.githubusercontent.com/bitcointreasuries/bitcointreasuries.github.io/master/_data/companies.json"
 CHECK_URL = COINGECKO_TREASURY_URL
+
+# English menu (reply keyboard + /commands)
+BTN_STATUS = "📊 Status"
+BTN_CHECK = "🔄 Check now"
+BTN_BUY_CHECK = "💰 Purchase check"
+BTN_SELL_CHECK = "📉 Sale check"
+BTN_BASELINE = "📌 Reset baseline"
+BTN_HELP = "❓ Help"
+BTN_HIDE_MENU = "⌨️ Hide menu"
+
+BOT_COMMANDS = [
+    BotCommand("start", "Open menu and show status"),
+    BotCommand("status", "Strategy BTC balance & baseline"),
+    BotCommand("check", "Run treasury check now"),
+    BotCommand("checkbuy", "Test purchase alert (admin)"),
+    BotCommand("checksell", "Test sale alert (admin)"),
+    BotCommand("baseline", "Reset baseline to live data"),
+    BotCommand("testalert", "Test notification delivery"),
+    BotCommand("chatid", "Show your Telegram ID"),
+    BotCommand("help", "Help and menu"),
+]
+
+MENU_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton(BTN_STATUS), KeyboardButton(BTN_CHECK)],
+        [KeyboardButton(BTN_BUY_CHECK), KeyboardButton(BTN_SELL_CHECK)],
+        [KeyboardButton(BTN_BASELINE), KeyboardButton(BTN_HELP)],
+        [KeyboardButton(BTN_HIDE_MENU)],
+    ],
+    resize_keyboard=True,
+)
 
 
 def write_log(msg: str):
@@ -72,6 +105,10 @@ async def deny_admin(update: Update) -> None:
         f"X_CHAT_ID на сервере: {X_CHAT_ID}\n"
         "Они должны совпадать. Узнайте ID: /chatid"
     )
+
+
+async def setup_bot_menu(bot: Bot) -> None:
+    await bot.set_my_commands(BOT_COMMANDS)
 
 
 async def validate_alert_target(bot: Bot) -> None:
@@ -281,7 +318,23 @@ async def run_holdings_check(bot: Bot) -> str:
 
 
 # === Commands ===
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "SaylorWatchBot monitors Strategy (MicroStrategy) BTC treasury.\n\n"
+        "• Alerts when holdings increase (purchase) or decrease (sale)\n"
+        "• Data source: CoinGecko public treasury API\n\n"
+        "Use the buttons below or type /help.\n"
+        f"Build: {BOT_VERSION}",
+        reply_markup=MENU_KEYBOARD,
+    )
+    await status(update, context, show_menu=False)
+
+
+async def status(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    show_menu: bool = True,
+):
     uptime = datetime.datetime.now() - start_time
     holdings = await fetch_strategy_holdings()
 
@@ -291,26 +344,29 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💰 {format_btc(holdings['btc'])} BTC (~{format_usd(holdings.get('usd', 0.0))})"
         )
     else:
-        btc_balance_info = "⚠️ Не удалось получить баланс Strategy"
+        btc_balance_info = "⚠️ Failed to fetch Strategy balance"
 
     state = load_holdings_state()
     if state:
         baseline_btc = format_btc(parse_number(state.get("btc", 0)))
-        baseline_line = f"📊 Baseline для алертов: {baseline_btc} BTC"
+        baseline_line = f"📊 Alert baseline: {baseline_btc} BTC"
     else:
-        baseline_line = "📊 Baseline ещё не задан (после первой проверки)"
+        baseline_line = "📊 Alert baseline: not set yet"
 
     msg = (
-        f"✅ Бот онлайн\n"
+        f"✅ Bot online\n"
         f"⏱ Uptime: {uptime}\n\n"
         f"{btc_balance_info}\n"
         f"{baseline_line}"
     )
 
     if is_admin(update.effective_user.id, update.effective_chat.id) and last_monitor_error:
-        msg += f"\n\n⚠️ Ошибка мониторинга: {last_monitor_error}"
+        msg += f"\n\n⚠️ Monitor error: {last_monitor_error}"
 
-    await update.message.reply_text(msg)
+    await update.message.reply_text(
+        msg,
+        reply_markup=MENU_KEYBOARD if show_menu else None,
+    )
 
 
 async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -320,15 +376,21 @@ async def uptime(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "📖 *Команды:*\n"
-        "/start, /status — баланс Strategy и baseline\n"
-        "/chatid — ваш ID для X_CHAT_ID\n"
-        "/check — проверить изменения сейчас (админ)\n"
-        "/testalert — тест уведомления (админ)\n"
-        "/setbaseline — задать baseline вручную (админ)\n"
-        "/uptime, /info, /clear, /restart"
+        "SaylorWatchBot — help\n\n"
+        "Menu buttons:\n"
+        f"• {BTN_STATUS} — current BTC & alert baseline\n"
+        f"• {BTN_CHECK} — compare live data vs baseline now\n"
+        f"• {BTN_BUY_CHECK} — simulate purchase alert (admin)\n"
+        f"• {BTN_SELL_CHECK} — simulate sale alert (admin)\n"
+        f"• {BTN_BASELINE} — set baseline = live CoinGecko balance\n"
+        f"• {BTN_HIDE_MENU} — hide keyboard\n\n"
+        "Commands:\n"
+        "/start /status /check /baseline\n"
+        "/checkbuy /checksell /testalert /chatid\n"
+        "/info /uptime (admin: /clear /restart)\n\n"
+        f"Version: {BOT_VERSION}"
     )
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    await update.message.reply_text(help_text, reply_markup=MENU_KEYBOARD)
 
 
 async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -365,10 +427,78 @@ async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("Проверяю CoinGecko…")
     result = await run_holdings_check(context.bot)
-    if result.startswith("Не удалось"):
-        await update.message.reply_text(f"❌ {result}")
+    if "отправлен" in result or "Изменений нет" in result or "Сохранён" in result:
+        await update.message.reply_text(f"✅ {result}", reply_markup=MENU_KEYBOARD)
     else:
-        await update.message.reply_text(f"✅ {result}")
+        await update.message.reply_text(f"❌ {result}", reply_markup=MENU_KEYBOARD)
+
+
+async def reset_baseline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set baseline to current live holdings (/baseline)."""
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
+        await deny_admin(update)
+        return
+
+    holdings = await fetch_strategy_holdings()
+    if not holdings:
+        await update.message.reply_text("Failed to fetch CoinGecko data.")
+        return
+
+    save_holdings_state(holdings)
+    await update.message.reply_text(
+        f"Baseline reset to live balance: {format_btc(holdings['btc'])} BTC",
+        reply_markup=MENU_KEYBOARD,
+    )
+
+
+async def simulate_purchase_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
+        await deny_admin(update)
+        return
+
+    holdings = await fetch_strategy_holdings()
+    if not holdings:
+        await update.message.reply_text("Failed to fetch CoinGecko data.")
+        return
+
+    test_btc = holdings["btc"] - max(MIN_BTC_CHANGE * 10, 100)
+    save_holdings_state(
+        {"name": holdings["name"], "btc": test_btc, "usd": 0.0, "source": "purchase-check-test"}
+    )
+    await update.message.reply_text(
+        f"Test baseline set lower ({format_btc(test_btc)} BTC). Running purchase check…",
+        reply_markup=MENU_KEYBOARD,
+    )
+    result = await run_holdings_check(context.bot)
+    await update.message.reply_text(
+        f"{'✅' if 'отправлен' in result else 'ℹ️'} {result}",
+        reply_markup=MENU_KEYBOARD,
+    )
+
+
+async def simulate_sale_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
+        await deny_admin(update)
+        return
+
+    holdings = await fetch_strategy_holdings()
+    if not holdings:
+        await update.message.reply_text("Failed to fetch CoinGecko data.")
+        return
+
+    test_btc = holdings["btc"] + max(MIN_BTC_CHANGE * 10, 100)
+    save_holdings_state(
+        {"name": holdings["name"], "btc": test_btc, "usd": 0.0, "source": "sale-check-test"}
+    )
+    await update.message.reply_text(
+        f"Test baseline set higher ({format_btc(test_btc)} BTC). Running sale check…",
+        reply_markup=MENU_KEYBOARD,
+    )
+    result = await run_holdings_check(context.bot)
+    await update.message.reply_text(
+        f"{'✅' if 'отправлен' in result else 'ℹ️'} {result}",
+        reply_markup=MENU_KEYBOARD,
+    )
 
 
 async def setbaseline(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -418,9 +548,29 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Uptime: {uptime_value}\n"
         f"Monitor interval: {MONITOR_INTERVAL_SECONDS}s\n"
         f"Alive ping enabled: {ENABLE_ALIVE_PING}\n"
+        f"Bot version: {BOT_VERSION}\n"
         f"Server Time: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def menu_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (update.message.text or "").strip()
+
+    if text == BTN_STATUS:
+        await status(update, context)
+    elif text == BTN_CHECK:
+        await check_now(update, context)
+    elif text == BTN_BUY_CHECK:
+        await simulate_purchase_check(update, context)
+    elif text == BTN_SELL_CHECK:
+        await simulate_sale_check(update, context)
+    elif text == BTN_BASELINE:
+        await reset_baseline(update, context)
+    elif text == BTN_HELP:
+        await help_command(update, context)
+    elif text == BTN_HIDE_MENU:
+        await update.message.reply_text("Menu hidden. Send /start to show it again.", reply_markup=ReplyKeyboardRemove())
 
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -518,6 +668,7 @@ async def _post_init(application: Application):
         write_log(f"⚠️ Polling clear error: {exc}")
 
     await validate_alert_target(application.bot)
+    await setup_bot_menu(application.bot)
 
     track_background_task(application, start_healthcheck_server(), "healthcheck-server")
     track_background_task(application, monitor_saylor_purchases(application.bot), "holdings-monitor")
@@ -550,8 +701,11 @@ if __name__ == "__main__":
         .build()
     )
 
-    app.add_handler(CommandHandler("start", status))
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("baseline", reset_baseline))
+    app.add_handler(CommandHandler("checkbuy", simulate_purchase_check))
+    app.add_handler(CommandHandler("checksell", simulate_sale_check))
     app.add_handler(CommandHandler("uptime", uptime))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("info", info))
@@ -562,4 +716,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("testalert", testalert))
     app.add_handler(CommandHandler("check", check_now))
     app.add_handler(CommandHandler("setbaseline", setbaseline))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_message))
     app.run_polling()
