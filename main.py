@@ -56,10 +56,23 @@ def alert_chat_id() -> int:
     return int(str(X_CHAT_ID).strip())
 
 
-def is_admin(user_id: int | None) -> bool:
-    if user_id is None:
-        return False
-    return str(user_id) == str(X_CHAT_ID).strip()
+def is_admin(user_id: int | None, chat_id: int | None = None) -> bool:
+    target = str(X_CHAT_ID).strip()
+    if user_id is not None and str(user_id) == target:
+        return True
+    if chat_id is not None and str(chat_id) == target:
+        return True
+    return False
+
+
+async def deny_admin(update: Update) -> None:
+    await update.message.reply_text(
+        "⛔ Команда только для админа.\n"
+        f"Ваш User ID: `{update.effective_user.id}`\n"
+        f"X_CHAT_ID на сервере: `{X_CHAT_ID}`\n"
+        "Они должны совпадать. Узнайте ID: /chatid",
+        parse_mode="Markdown",
+    )
 
 
 async def validate_alert_target(bot: Bot) -> None:
@@ -228,8 +241,8 @@ async def send_holdings_alert(bot: Bot, text: str) -> None:
     await bot.send_message(chat_id=alert_chat_id(), text=text)
 
 
-async def run_holdings_check(bot: Bot) -> str | None:
-    """One monitoring cycle. Returns error text or None on success."""
+async def run_holdings_check(bot: Bot) -> str:
+    """One monitoring cycle. Returns a short status message for logs or /check."""
     global last_monitor_check, last_monitor_error
 
     last_monitor_check = datetime.datetime.now()
@@ -246,23 +259,26 @@ async def run_holdings_check(bot: Bot) -> str | None:
     if previous_btc is None:
         save_holdings_state(holdings)
         write_log(f"📊 Baseline сохранён: {format_btc(current_btc)} BTC")
-        return None
+        return f"Сохранён baseline: {format_btc(current_btc)} BTC"
 
     delta = current_btc - previous_btc
     if abs(delta) < MIN_BTC_CHANGE:
         write_log("ℹ️ Проверка — без значимых изменений.")
-        return None
+        return (
+            f"Изменений нет. Сейчас {format_btc(current_btc)} BTC, "
+            f"baseline {format_btc(previous_btc)} BTC (порог {MIN_BTC_CHANGE} BTC)."
+        )
 
     if delta > 0:
         await send_holdings_alert(bot, format_holdings_alert(previous_btc, holdings, delta, increased=True))
         save_holdings_state(holdings)
         write_log(f"🚨 Закупка: +{format_btc(delta)} BTC")
-        return None
+        return f"Алерт закупки отправлен: +{format_btc(delta)} BTC"
 
     await send_holdings_alert(bot, format_holdings_alert(previous_btc, holdings, delta, increased=False))
     save_holdings_state(holdings)
     write_log(f"🚨 Продажа: {format_btc(delta)} BTC")
-    return None
+    return f"Алерт продажи отправлен: {format_btc(delta)} BTC"
 
 
 # === Commands ===
@@ -292,7 +308,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{baseline_line}"
     )
 
-    if is_admin(update.effective_user.id) and last_monitor_error:
+    if is_admin(update.effective_user.id, update.effective_chat.id) and last_monitor_error:
         msg += f"\n\n⚠️ Ошибка мониторинга: {last_monitor_error}"
 
     await update.message.reply_text(msg)
@@ -328,34 +344,37 @@ async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def testalert(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ Только для админа (X_CHAT_ID).")
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
+        await deny_admin(update)
         return
     try:
         await send_holdings_alert(
             context.bot,
             "✅ Тест: уведомления доходят. Мониторинг закупок и продаж включён.",
         )
-        await update.message.reply_text("Сообщение отправлено.")
+        await update.message.reply_text(
+            f"Тестовый алерт отправлен в chat_id `{alert_chat_id()}`.",
+            parse_mode="Markdown",
+        )
     except Exception as exc:
         await update.message.reply_text(f"Ошибка: {exc}\nПроверьте /chatid и X_CHAT_ID.")
 
 
 async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ Только для админа.")
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
+        await deny_admin(update)
         return
     await update.message.reply_text("Проверяю CoinGecko…")
-    err = await run_holdings_check(context.bot)
-    if err:
-        await update.message.reply_text(f"Проверка не удалась: {err}")
+    result = await run_holdings_check(context.bot)
+    if result.startswith("Не удалось"):
+        await update.message.reply_text(f"❌ {result}")
     else:
-        await update.message.reply_text("Проверка выполнена. Если был значимый сдвиг — пришлю алерт.")
+        await update.message.reply_text(f"✅ {result}")
 
 
 async def setbaseline(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ Только для админа.")
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
+        await deny_admin(update)
         return
 
     if not context.args:
@@ -387,7 +406,7 @@ async def setbaseline(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
         await update.message.reply_text("⛔ Access denied.")
         return
     commit = os.getenv("RENDER_GIT_COMMIT", "N/A")
@@ -406,7 +425,7 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
         await update.message.reply_text("⛔ Access denied.")
         return
     await update.message.reply_text("🔄 Restarting Render instance...")
@@ -415,8 +434,8 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Deletes recent bot messages"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ Access denied.")
+    if not is_admin(update.effective_user.id, update.effective_chat.id):
+        await deny_admin(update)
         return
 
     chat_id = update.effective_chat.id
@@ -470,7 +489,8 @@ async def monitor_saylor_purchases(bot: Bot):
     write_log("🕵️ Мониторинг Strategy (CoinGecko + fallback)")
     while True:
         try:
-            await run_holdings_check(bot)
+            result = await run_holdings_check(bot)
+            write_log(f"Monitor: {result}")
         except Exception as exc:
             last_monitor_error = f"{type(exc).__name__}: {exc}"
             logger.exception("Monitoring error")
