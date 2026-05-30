@@ -3,5 +3,7 @@ __pycache__/
 *.py[cod]
 .venv/
 last_holdings.json
+last_strategy_site.json
+user_languages.json
 last_purchase.txt
 bitcoin.json
