@@ -782,9 +782,15 @@ async def send_alert_with_card(
     increased: bool,
 ) -> None:
     """Шлёт alert: с image-карточкой, либо текстом если картинка недоступна."""
+    # Карточка всегда на английском (для международной аудитории/репостов),
+    # текст-подпись при этом остаётся на языке получателя.
+    # Ведущее эмодзи убираем: шрифт карточки рисует его «квадратом»,
+    # а цвет и так передаётся рамкой (orange — покупка, red — продажа).
+    raw_title = t(DEFAULT_LANG, "alert_buy_title" if increased else "alert_sell_title")
+    card_title = re.sub(r"^[^\x00-\x7f]+\s*", "", raw_title)
     card = generate_card(
         CardData(
-            title=t(alert_lang(), "alert_buy_title" if increased else "alert_sell_title"),
+            title=card_title,
             delta_btc=f"{'+' if increased else '−'}{format_btc(abs(delta_btc))} BTC",
             delta_usd=f"\u2248 {format_usd_compact(abs(delta_usd))}" if delta_usd else "",
             total_btc=f"{format_btc(total_btc)} BTC",
