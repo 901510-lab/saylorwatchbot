@@ -1,0 +1,11 @@
+[Unit]
+Description=Paper Wallet daily post at 12:00 (Europe/Moscow)
+
+[Timer]
+OnCalendar=*-*-* 12:00:00
+Timezone=Europe/Moscow
+Persistent=true
+Unit=paper-wallet-daily.service
+
+[Install]
+WantedBy=timers.target

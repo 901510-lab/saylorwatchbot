@@ -1,0 +1,15 @@
+[Unit]
+Description=SaylorWatch email catch-up after login/boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+EnvironmentFile=@REPO@/scripts/email_support.env
+ExecStart=@PYTHON@ @REPO@/scripts/email_support_agent.py --startup
+StandardOutput=append:@REPO@/scripts/email_support.log
+StandardError=append:@REPO@/scripts/email_support.log
+
+[Install]
+WantedBy=default.target

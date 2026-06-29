@@ -1,0 +1,10 @@
+[Unit]
+Description=SaylorWatch email poll (while PC is on)
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+EnvironmentFile=@REPO@/scripts/email_support.env
+ExecStart=@PYTHON@ @REPO@/scripts/email_support_agent.py
+StandardOutput=append:@REPO@/scripts/email_support.log
+StandardError=append:@REPO@/scripts/email_support.log

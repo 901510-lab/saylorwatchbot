@@ -1,0 +1,16 @@
+[Unit]
+Description=Paper Wallet — daily CoinGecko tables to Telegram channel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+EnvironmentFile=-@REPO@/scripts/paper_wallet.env
+EnvironmentFile=-@REPO@/.env
+ExecStart=@PYTHON@ @REPO@/scripts/paper_wallet_post.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

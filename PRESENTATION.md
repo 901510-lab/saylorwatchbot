@@ -10,6 +10,21 @@ style: |
   strong { color: #ffb040; }
   code { color: #ffb040; background: #15151a; }
   a { color: #ffb040; }
+  table { border-collapse: collapse; width: 100%; background: transparent; }
+  th {
+    background: #1a1a22;
+    color: #f7931a;
+    border: 1px solid #3a3a44;
+    padding: 8px 12px;
+    text-align: left;
+  }
+  td {
+    color: #f5f5f7;
+    background: #121218;
+    border: 1px solid #3a3a44;
+    padding: 8px 12px;
+  }
+  tr:nth-child(even) td { background: #17171f; }
 ---
 
 <!-- _class: lead -->
