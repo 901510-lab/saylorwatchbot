@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll SaylorWatch inbox every 30 min while logged in
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=30min
+Persistent=true
+Unit=saylorwatch-email-poll.service
+
+[Install]
+WantedBy=timers.target

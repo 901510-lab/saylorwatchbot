@@ -11,3 +11,12 @@ last_holdings.json
 last_purchase.txt
 README.md
 deploy.sh
+scripts/
+assets/
+*.zip
+*.md
+paper_wallet_state.json
+free_alert_queue.json
+free_tier_perks.json
+subscribers.json
+payments.json

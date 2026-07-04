@@ -1,0 +1,127 @@
+{
+  "signals": [
+    {
+      "entity_id": "strategy",
+      "entity_name": "Strategy",
+      "side": "buy",
+      "btc": 24869,
+      "usd_value": 2400000000,
+      "holdings_btc": 843738,
+      "date": "2026-05-28",
+      "buy_price": 96500,
+      "source": "showcase"
+    },
+    {
+      "entity_id": "strategy",
+      "entity_name": "Strategy",
+      "side": "buy",
+      "btc": 1587,
+      "usd_value": 100019088,
+      "holdings_btc": 847363,
+      "date": "2026-06-15",
+      "buy_price": 63024,
+      "source": "showcase"
+    },
+    {
+      "entity_id": "strategy",
+      "entity_name": "Strategy",
+      "side": "buy",
+      "btc": 4220,
+      "usd_value": 268000000,
+      "holdings_btc": 845776,
+      "date": "2026-06-02",
+      "buy_price": 63450,
+      "source": "showcase"
+    },
+    {
+      "entity_id": "tesla",
+      "entity_name": "Tesla",
+      "side": "buy",
+      "btc": 9720,
+      "usd_value": 612000000,
+      "holdings_btc": 11509,
+      "date": "2026-04-18",
+      "source": "showcase"
+    },
+    {
+      "entity_id": "block",
+      "entity_name": "Block",
+      "side": "buy",
+      "btc": 158,
+      "usd_value": 10200000,
+      "holdings_btc": 9032,
+      "date": "2026-06-20",
+      "source": "showcase"
+    },
+    {
+      "entity_id": "mara",
+      "entity_name": "MARA Holdings",
+      "side": "sell",
+      "btc": 500,
+      "usd_value": 30700000,
+      "holdings_btc": 35303,
+      "date": "2026-05-10",
+      "source": "showcase"
+    },
+    {
+      "entity_id": "riot",
+      "entity_name": "Riot Platforms",
+      "side": "sell",
+      "btc": 175,
+      "usd_value": 10700000,
+      "holdings_btc": 15680,
+      "date": "2026-06-01",
+      "source": "showcase"
+    },
+    {
+      "entity_id": "metaplanet",
+      "entity_name": "Metaplanet",
+      "side": "buy",
+      "btc": 2823,
+      "usd_value": 173000000,
+      "holdings_btc": 43000,
+      "date": "2026-06-28",
+      "source": "showcase"
+    },
+    {
+      "entity_id": "ibit",
+      "entity_name": "BlackRock IBIT",
+      "side": "inflow",
+      "btc": 2847,
+      "usd_value": 175000000,
+      "date": "2026-06-24",
+      "is_etf": true,
+      "source": "showcase"
+    },
+    {
+      "entity_id": "fbtc",
+      "entity_name": "Fidelity FBTC",
+      "side": "inflow",
+      "btc": 1120,
+      "usd_value": 68800000,
+      "date": "2026-06-18",
+      "is_etf": true,
+      "source": "showcase"
+    },
+    {
+      "entity_id": "gbtc",
+      "entity_name": "Grayscale GBTC",
+      "side": "outflow",
+      "btc": 1022,
+      "usd_value": 62800000,
+      "date": "2026-06-30",
+      "is_etf": true,
+      "source": "showcase"
+    },
+    {
+      "entity_id": "ark",
+      "entity_name": "ARK 21Shares ARKB",
+      "side": "outflow",
+      "btc": 649,
+      "usd_value": 39900000,
+      "date": "2026-06-27",
+      "is_etf": true,
+      "source": "showcase"
+    }
+  ]
+}

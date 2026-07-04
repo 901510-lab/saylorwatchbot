@@ -1,0 +1,17 @@
+{
+  "default_min_btc_change": 1,
+  "entities": [
+    { "id": "strategy", "name": "Strategy", "type": "company", "ticker": "MSTR", "source": "strategy", "min_btc_change": 1, "enabled": true },
+
+    { "id": "tesla", "name": "Tesla", "type": "company", "ticker": "TSLA", "source": "coingecko_treasury", "min_btc_change": 50, "enabled": true },
+    { "id": "block", "name": "Block", "type": "company", "ticker": "XYZ", "source": "coingecko_treasury", "min_btc_change": 25, "enabled": true },
+    { "id": "marathon", "name": "MARA Holdings", "type": "company", "ticker": "MARA", "source": "coingecko_treasury", "min_btc_change": 50, "enabled": true },
+    { "id": "riot", "name": "Riot Platforms", "type": "company", "ticker": "RIOT", "source": "coingecko_treasury", "min_btc_change": 50, "enabled": true },
+    { "id": "metaplanet", "name": "Metaplanet", "type": "company", "ticker": "3350.T", "source": "coingecko_treasury", "min_btc_change": 25, "enabled": true },
+
+    { "id": "ibit", "name": "BlackRock IBIT", "type": "etf", "ticker": "IBIT", "source": "farside", "min_btc_change": 100, "enabled": true },
+    { "id": "fbtc", "name": "Fidelity FBTC", "type": "etf", "ticker": "FBTC", "source": "farside", "min_btc_change": 100, "enabled": true },
+    { "id": "gbtc", "name": "Grayscale GBTC", "type": "etf", "ticker": "GBTC", "source": "farside", "min_btc_change": 100, "enabled": true },
+    { "id": "ark", "name": "ARK 21Shares ARKB", "type": "etf", "ticker": "ARKB", "source": "farside", "min_btc_change": 100, "enabled": true }
+  ]
+}
