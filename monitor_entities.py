@@ -136,7 +136,7 @@ async def _check_one_entity(
         lang=lang,
         entity=entity.name,
     )
-    delivered = await app.send_alert_with_card(
+    alert_instant, _alert_queued = await app.send_alert_with_card(
         bot,
         text=alert_text,
         delta_btc=delta,
@@ -149,7 +149,7 @@ async def _check_one_entity(
         stats=_stats_from_holdings(holdings),
         buy_price=btc_price if increased else 0.0,
     )
-    if delivered > 0:
+    if alert_instant + _alert_queued > 0:
         save_baseline(
             entity.id,
             btc=current_btc,
@@ -163,4 +163,4 @@ async def _check_one_entity(
         app.write_log(f"🚨 [{entity.id}] Sale: {app.format_btc(delta)} BTC")
         return t(lang, "check_entity_sale_sent", entity=entity.name, delta=app.format_btc(delta))
     app.write_log(f"⚠️ [{entity.id}] Alert not delivered — baseline kept")
-    return t(lang, "check_fetch_error")
+    return t(lang, "check_delivery_failed")

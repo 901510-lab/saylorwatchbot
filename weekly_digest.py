@@ -45,6 +45,9 @@ FREE_WEEKLY_DIGEST_ENABLED = os.environ.get("FREE_WEEKLY_DIGEST_ENABLED", "true"
     "yes",
     "on",
 }
+WEEKLY_DIGEST_EN_SUMMARY_ENABLED = os.environ.get(
+    "WEEKLY_DIGEST_EN_SUMMARY_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
 SNAPSHOT_FILE = Path(os.environ.get("WEEKLY_DIGEST_SNAPSHOT_FILE", "weekly_digest_snapshot.json"))
 STATE_FILE = Path(os.environ.get("WEEKLY_DIGEST_STATE_FILE", "weekly_digest_state.json"))
 COINGECKO_CHART_URL = (
@@ -153,13 +156,22 @@ def save_snapshot(data: WeeklyDigestData) -> None:
             "btc": row.holdings_btc,
             "avg_price": row.avg_price,
             "pnl": row.pnl,
+            "net_btc_week": row.net_btc_week,
+        }
+    etfs: dict[str, dict[str, float]] = {}
+    for row in data.etfs:
+        etfs[row.entity_id] = {
+            "ticker": row.ticker,
+            "net_flow_btc": row.net_flow_btc,
         }
     payload = {
         "saved_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "period_key": period_key_for_moment(),
         "period_end": data.period_end.isoformat(),
         "btc_price": data.btc_price_now,
+        "total_tracked_btc": data.total_tracked_btc,
         "entities": entities,
+        "etfs": etfs,
     }
     atomic_write_json(SNAPSHOT_FILE, payload)
 
@@ -540,6 +552,70 @@ def _fmt_btc_qty(value: float) -> str:
     return _fmt_btc(value).lstrip("+")
 
 
+def _fmt_btc_abs(value: float | None) -> str:
+    """Абсолютный баланс BTC без знака +/-."""
+    if value is None:
+        return "—"
+    return f"{abs(value):,.1f}".rstrip("0").rstrip(".")
+
+
+def _fmt_usd_level(value: float | None) -> str:
+    """Спот/уровень цены USD без знака +/-."""
+    if value is None:
+        return "—"
+    abs_v = abs(value)
+    if abs_v >= 1e9:
+        return f"${abs_v / 1e9:.1f}B"
+    if abs_v >= 1e6:
+        return f"${abs_v / 1e6:.1f}M"
+    if abs_v >= 1e3:
+        return f"${abs_v / 1e3:.1f}K"
+    return f"${abs_v:,.0f}"
+
+
+def _corp_ticker_label(row: CompanyDigestRow) -> str:
+    if row.ticker:
+        return f"{row.name} ({row.ticker})"
+    return row.name
+
+
+def _resolve_whale_label(data: WeeklyDigestData) -> str | None:
+    if not data.whale_name:
+        return None
+    name_part = data.whale_name
+    side_suffix = ""
+    if " (" in data.whale_name and data.whale_name.endswith(")"):
+        idx = data.whale_name.rfind(" (")
+        name_part = data.whale_name[:idx]
+        side_suffix = data.whale_name[idx:]
+    for row in data.companies:
+        if row.name == name_part or row.ticker == name_part:
+            return f"{row.name} ({row.ticker}){side_suffix}"
+    for row in data.etfs:
+        if row.ticker == name_part:
+            return row.ticker
+    return data.whale_name
+
+
+def _whale_already_in_wow(data: WeeklyDigestData, prev_entities: dict[str, Any]) -> bool:
+    """Крупнейшая сделка уже отражена в WoW по holdings — не дублировать Top mover."""
+    if not data.whale_name:
+        return False
+    name_part = data.whale_name.split(" (")[0] if " (" in data.whale_name else data.whale_name
+    for row in data.companies:
+        if row.name != name_part and row.ticker != name_part:
+            continue
+        prev_row = prev_entities.get(row.entity_id)
+        if not isinstance(prev_row, dict) or prev_row.get("btc") is None:
+            return False
+        try:
+            prev_btc = float(prev_row["btc"])
+        except (TypeError, ValueError):
+            return False
+        return abs(row.holdings_btc - prev_btc) >= 0.01
+    return False
+
+
 def _fmt_net_cell(row: CompanyDigestRow) -> str:
     """NET: trades, holdings Δ (†), или idle (нет сделок и нет изменения HOLD)."""
     if row.net_source == "holdings" and row.net_btc_week is not None:
@@ -601,7 +677,7 @@ def build_card_data(data: WeeklyDigestData) -> "WeeklyDigestCardData":
         f"Tracked {_fmt_btc(data.total_tracked_btc)} BTC"
     )
     if data.btc_price_now:
-        market_line += f" · Spot {_fmt_usd_compact(data.btc_price_now)}"
+        market_line += f" · Spot {_fmt_usd_level(data.btc_price_now)}"
 
     return WeeklyDigestCardData(
         period_label=data.period_label,
@@ -664,13 +740,158 @@ def format_text_weekly_digest(data: WeeklyDigestData, lang: str) -> str:
                 lang,
                 "free_weekly_btc",
                 pct=_fmt_pct(data.btc_week_change_pct),
-                spot=_fmt_usd_compact(data.btc_price_now) if data.btc_price_now else "—",
+                spot=_fmt_usd_level(data.btc_price_now) if data.btc_price_now else "—",
             )
         )
 
     lines.append("")
     lines.append(t(lang, "free_weekly_premium_hint"))
+    if weekly_en_summary_enabled():
+        summary = format_weekly_ticker_summary_en(data)
+        if summary:
+            lines.extend(["", summary])
     return "\n".join(lines)
+
+
+def weekly_en_summary_enabled() -> bool:
+    return WEEKLY_DIGEST_EN_SUMMARY_ENABLED
+
+
+def _wow_holdings_line(label: str, delta: float | None, *, holdings: float) -> str:
+    hold_txt = _fmt_btc_abs(holdings)
+    if delta is None:
+        return f"• {label}: no prior week baseline · holdings {hold_txt} BTC"
+    if abs(delta) < 0.01:
+        return f"• {label}: unchanged vs previous week · holdings {hold_txt} BTC"
+    flow = "inflow" if delta > 0 else "outflow"
+    return (
+        f"• {label}: {flow} {_fmt_btc(abs(delta))} BTC vs previous week "
+        f"· holdings {hold_txt} BTC"
+    )
+
+
+def _wow_etf_line(tick: str, current: float, previous: float | None, *, has_data: bool) -> str:
+    if not has_data:
+        return f"• {tick}: no ETF flow data this week"
+    if previous is None:
+        return f"• {tick}: {_fmt_btc(current)} BTC net this week (first ETF baseline)"
+    delta = current - previous
+    if abs(delta) < 0.01 and abs(current) < 0.01:
+        return f"• {tick}: unchanged vs previous week (0 BTC net flows)"
+    prev_txt = _fmt_btc(previous)
+    curr_txt = _fmt_btc(current)
+    if abs(delta) < 0.01:
+        return f"• {tick}: {curr_txt} BTC net (same as previous week {prev_txt})"
+    chg = _fmt_btc(delta)
+    direction = "higher" if delta > 0 else "lower"
+    return f"• {tick}: {curr_txt} BTC net this week vs {prev_txt} prior week (Δ {chg}, {direction})"
+
+
+def format_weekly_ticker_summary_en(
+    data: WeeklyDigestData,
+    *,
+    prev: dict[str, Any] | None = None,
+) -> str:
+    """Короткое EN-саммари: состояние тикеров + сравнение с прошлой неделей."""
+    prev = prev if prev is not None else load_snapshot()
+    prev_entities = prev.get("entities") if isinstance(prev.get("entities"), dict) else {}
+    prev_etfs = prev.get("etfs") if isinstance(prev.get("etfs"), dict) else {}
+    has_prior = bool(prev_entities or prev_etfs)
+
+    lines = [f"📌 Weekly snapshot (EN) · {data.period_label}", ""]
+
+    if data.btc_week_change_pct is not None:
+        spot = _fmt_usd_level(data.btc_price_now) if data.btc_price_now else "—"
+        lines.append(f"• BTC spot: {_fmt_pct(data.btc_week_change_pct)} over 7d · {spot}")
+
+    prev_btc_price = prev.get("btc_price")
+    if (
+        has_prior
+        and isinstance(prev_btc_price, (int, float))
+        and data.btc_price_now
+        and prev_btc_price > 0
+    ):
+        wow_pct = (data.btc_price_now - float(prev_btc_price)) / float(prev_btc_price) * 100.0
+        lines.append(
+            f"• BTC vs prior digest: {_fmt_pct(wow_pct)} "
+            f"({_fmt_usd_level(float(prev_btc_price))} → {_fmt_usd_level(data.btc_price_now)})"
+        )
+
+    lines.append("")
+    if has_prior:
+        lines.append("📊 Week-over-week (vs previous digest):")
+    else:
+        lines.append("📊 Week-over-week: first digest baseline (no prior week yet):")
+
+    for row in data.companies:
+        label = _corp_ticker_label(row)
+        prev_row = prev_entities.get(row.entity_id)
+        prev_btc = None
+        if isinstance(prev_row, dict) and prev_row.get("btc") is not None:
+            try:
+                prev_btc = float(prev_row["btc"])
+            except (TypeError, ValueError):
+                prev_btc = None
+        delta = (row.holdings_btc - prev_btc) if prev_btc is not None else None
+        lines.append(_wow_holdings_line(label, delta, holdings=row.holdings_btc))
+
+    if data.etfs:
+        lines.append("")
+        lines.append("🏦 ETF weekly net flows:")
+        for row in data.etfs:
+            prev_row = prev_etfs.get(row.entity_id)
+            prev_flow = None
+            if isinstance(prev_row, dict) and prev_row.get("net_flow_btc") is not None:
+                try:
+                    prev_flow = float(prev_row["net_flow_btc"])
+                except (TypeError, ValueError):
+                    prev_flow = None
+            lines.append(
+                _wow_etf_line(
+                    row.ticker,
+                    row.net_flow_btc,
+                    prev_flow,
+                    has_data=row.has_data,
+                )
+            )
+
+    prev_tracked = prev.get("total_tracked_btc")
+    if has_prior and isinstance(prev_tracked, (int, float)) and data.total_tracked_btc > 0:
+        tracked_delta = data.total_tracked_btc - float(prev_tracked)
+        if abs(tracked_delta) < 0.01:
+            lines.append(
+                f"• All tracked treasuries: unchanged vs previous week "
+                f"({_fmt_btc_abs(data.total_tracked_btc)} BTC)"
+            )
+        else:
+            flow = "inflow" if tracked_delta > 0 else "outflow"
+            lines.append(
+                f"• All tracked treasuries: {flow} {_fmt_btc(abs(tracked_delta))} BTC WoW "
+                f"· total {_fmt_btc_abs(data.total_tracked_btc)} BTC"
+            )
+    elif (
+        data.whale_name
+        and data.whale_net_btc is not None
+        and not _whale_already_in_wow(data, prev_entities)
+    ):
+        whale_label = _resolve_whale_label(data) or data.whale_name
+        lines.append(f"• Top mover this week: {whale_label} · {_fmt_btc(data.whale_net_btc)} BTC")
+
+    lines.append("")
+    lines.append("Public data only · not investment advice.")
+    return "\n".join(lines)
+
+
+async def _send_weekly_en_summary(bot, user_id: int, data: WeeklyDigestData) -> None:
+    if not weekly_en_summary_enabled():
+        return
+    text = format_weekly_ticker_summary_en(data)
+    if not text:
+        return
+    try:
+        await bot.send_message(chat_id=user_id, text=text)
+    except Exception as exc:
+        logger.warning("Weekly EN summary send failed user=%s: %s", user_id, exc)
 
 
 async def deliver_weekly_digest(
@@ -703,6 +924,8 @@ async def deliver_weekly_digest(
                 await bot.send_photo(chat_id=uid, photo=photo, caption=caption)
             else:
                 await bot.send_message(chat_id=uid, text=caption + "\n\n" + card_input.market_line)
+            if weekly_en_summary_enabled():
+                await _send_weekly_en_summary(bot, uid, data)
             sent += 1
         except Exception as exc:
             logger.warning("Weekly digest send failed user=%s: %s", uid, exc)
@@ -890,6 +1113,8 @@ __all__ = [
     "free_weekly_digest_enabled",
     "format_caption",
     "format_text_weekly_digest",
+    "format_weekly_ticker_summary_en",
+    "weekly_en_summary_enabled",
     "period_key_for_moment",
     "run_scheduled_weekly_digest",
     "run_scheduled_free_weekly_digest",

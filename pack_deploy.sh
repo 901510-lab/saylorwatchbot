@@ -31,8 +31,13 @@ BOT_FILES=(
   paper_wallet.py
   transactions.py
   weekly_digest.py
+  bot_help_wiki.py
+  plan_showcase.py
+  weekly_report_export.py
   whales.py
+  assets/plan_showcase_signals.json
   social_growth.py
+  social_schedule.py
   requirements.txt
   start.sh
   sources/__init__.py
@@ -55,8 +60,13 @@ SCRIPT_FILES=(
   scripts/Modelfile.saylorwatch-support
   scripts/setup_ollama_support_model.sh
   scripts/install_email_systemd.sh
+  scripts/export_social_tiers.py
   scripts/sanity_check.py
   scripts/paper_wallet_post.py
+  scripts/social_calendar_sync.py
+  scripts/social_calendar.example.env
+  scripts/setup_social_calendar.sh
+  scripts/requirements-social.txt
   scripts/systemd/saylorwatch-email-poll.service
   scripts/systemd/saylorwatch-email-poll.timer
   scripts/systemd/saylorwatch-email-startup.service

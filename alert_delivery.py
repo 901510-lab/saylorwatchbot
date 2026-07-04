@@ -237,12 +237,6 @@ async def dispatch_alert(
 
         try:
             if recipient.include_card and photo is not None:
-                from free_tier_perks import record_free_strategy_card
-
-                record_free_strategy_card(
-                    recipient.user_id,
-                    abs_delta_btc=abs_btc,
-                )
                 try:
                     await _send_photo(bot, recipient.user_id, photo, caption)
                 except Exception as photo_exc:
@@ -252,6 +246,13 @@ async def dispatch_alert(
                         photo_exc,
                     )
                     await _send_text(bot, recipient.user_id, text_only)
+                else:
+                    from free_tier_perks import record_free_strategy_card
+
+                    record_free_strategy_card(
+                        recipient.user_id,
+                        abs_delta_btc=abs_btc,
+                    )
             else:
                 await _send_text(bot, recipient.user_id, text_only)
             instant += 1

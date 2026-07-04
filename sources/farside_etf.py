@@ -13,6 +13,7 @@ import datetime
 import logging
 import os
 import re
+import time
 from html import unescape
 from typing import Any
 
@@ -57,6 +58,46 @@ FARSIDE_HTTP_HEADERS = {
 }
 
 _DATE_RE = re.compile(r"^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$")
+
+# JustRunMy / датацентры: Farside часто недоступен — не долбим каждые 5 мин
+_FARSIDE_COOLDOWN_UNTIL: float = 0.0
+_FARSIDE_FALLBACK_LOGGED = False
+FARSIDE_RETRY_COOLDOWN_SEC = max(
+    300, int(os.environ.get("FARSIDE_RETRY_COOLDOWN_SEC", "21600"))
+)
+
+
+def _sosovalue_configured() -> bool:
+    return bool(os.environ.get("SOSOVALUE_API_KEY", "").strip())
+
+
+def _farside_on_cooldown() -> bool:
+    return time.time() < _FARSIDE_COOLDOWN_UNTIL
+
+
+def _mark_farside_unreachable() -> None:
+    global _FARSIDE_COOLDOWN_UNTIL, _FARSIDE_FALLBACK_LOGGED
+    _FARSIDE_COOLDOWN_UNTIL = time.time() + FARSIDE_RETRY_COOLDOWN_SEC
+    if _sosovalue_configured():
+        if not _FARSIDE_FALLBACK_LOGGED:
+            logger.info(
+                "Farside ETF unreachable from this host — using SoSoValue for ~%dh "
+                "(set FARSIDE_RETRY_COOLDOWN_SEC to retry sooner)",
+                FARSIDE_RETRY_COOLDOWN_SEC // 3600,
+            )
+            _FARSIDE_FALLBACK_LOGGED = True
+    else:
+        logger.warning(
+            "Farside ETF unreachable and SOSOVALUE_API_KEY not set — ETF flows disabled "
+            "until retry in %ds",
+            FARSIDE_RETRY_COOLDOWN_SEC,
+        )
+
+
+def _reset_farside_cooldown() -> None:
+    global _FARSIDE_COOLDOWN_UNTIL, _FARSIDE_FALLBACK_LOGGED
+    _FARSIDE_COOLDOWN_UNTIL = 0.0
+    _FARSIDE_FALLBACK_LOGGED = False
 
 
 def _parse_flow_cell(raw: str) -> float | None:
@@ -238,13 +279,18 @@ class FarsideEtfSource(MultiSource):
         return None
 
     async def _fetch_flow_row(self) -> tuple[dict[str, Any] | None, str]:
-        row = await self._fetch_farside_row()
-        if row:
-            return row, SOURCE_KEY
+        if not _farside_on_cooldown():
+            row = await self._fetch_farside_row()
+            if row:
+                _reset_farside_cooldown()
+                return row, SOURCE_KEY
         row = await fetch_sosovalue_flow_row()
         if row:
-            logger.info("Farside ETF: using SoSoValue fallback (%s)", row.get("date_iso"))
+            if not _farside_on_cooldown():
+                logger.info("Farside ETF: using SoSoValue fallback (%s)", row.get("date_iso"))
             return row, SOSO_KEY
+        if not _farside_on_cooldown():
+            _mark_farside_unreachable()
         return None, SOURCE_KEY
 
     async def fetch(self) -> list[Holdings]:
@@ -291,6 +337,20 @@ async def fetch_entity_etf_flow_series(
     """Дневные потоки одного ETF между датами (для catch-up после простоя)."""
     rows = await fetch_farside_table_rows()
     if not rows:
+        try:
+            start = datetime.date.fromisoformat(since_date_exclusive) + datetime.timedelta(days=1)
+            end = datetime.date.fromisoformat(until_date_inclusive)
+            rows = await fetch_sosovalue_table_rows(start, end)
+            if rows:
+                logger.info(
+                    "ETF catch-up: SoSoValue fallback (%d days, %s..%s)",
+                    len(rows),
+                    start.isoformat(),
+                    end.isoformat(),
+                )
+        except ValueError:
+            rows = []
+    if not rows:
         return []
     btc_price = await _fetch_btc_price_usd()
     ticker = (entity.ticker or "").upper()
@@ -317,17 +377,31 @@ async def fetch_entity_etf_flow_series(
 
 async def fetch_farside_table_rows(*, urls: list[str] | None = None) -> list[dict[str, Any]]:
     """Полная таблица Farside для недельной агрегации ETF-потоков."""
+    if _farside_on_cooldown():
+        return []
+
     targets = urls or FARSIDE_BTC_URLS
+    quiet = _sosovalue_configured()
     for url in targets:
         html = await fetch_text(url, timeout_seconds=25, headers=FARSIDE_HTTP_HEADERS)
         if not html:
-            logger.warning("Farside ETF: no response from %s", url)
+            if quiet:
+                logger.debug("Farside ETF: no response from %s", url)
+            else:
+                logger.warning("Farside ETF: no response from %s", url)
             continue
         rows = parse_farside_table(html)
         if rows:
+            _reset_farside_cooldown()
             logger.info("Farside ETF: parsed %d rows from %s", len(rows), url)
             return rows
-        logger.warning("Farside ETF: table not parsed from %s", url)
+        if quiet:
+            logger.debug("Farside ETF: table not parsed from %s", url)
+        else:
+            logger.warning("Farside ETF: table not parsed from %s", url)
+
+    if quiet:
+        _mark_farside_unreachable()
     return []
 
 

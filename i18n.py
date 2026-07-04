@@ -40,19 +40,32 @@ TEXTS: dict[str, dict[str, str]] = {
         "deny_admin": "⛔ Admin only.\nYour User ID: {user_id}\nUse /chatid if you need your ID.",
         "chatid_help": "For X_CHAT_ID on hosting use:\nChat ID: {chat_id}\nUser ID: {user_id}\n\nIn a private chat they are usually the same.\nDo not use the bot's own ID.",
         "start_intro": (
-            "SaylorWatchBot — Strategy BTC intelligence.\n\n"
-            "🏦 /holdings — treasury overview\n"
-            "📊 /stats — avg price & PnL\n"
-            "🟠 /buy — latest purchase\n"
-            "🔔 Auto alerts on every buy & sell\n\n"
-            "💎 Premium — all whales, cards, ETF flows\n"
-            "   /plans — Free vs Premium\n"
-            "   /subscribe — {stars} ⭐ / {days} days\n"
-            "   /mysub — your subscription\n"
-            "   📊 /weekly — Premium weekly PNG digest (Sun 12:00 NY)\n\n"
-            "Source: Strategy · Build: {version}"
+            "🟠 SaylorWatch — BTC whale alerts with auto PNG cards.\n\n"
+            "Below: real signal examples — 🆓 Free vs ⭐ Premium.\n"
+            "Compare plans: /plans · Upgrade: /subscribe ({stars} ⭐ / {days}d)\n"
+            "Build: {version}"
+        ),
+        "start_free_header": "🆓 FREE tier — what you get",
+        "start_free_showcase": (
+            "Example: Strategy (Saylor) BUY alerts.\n"
+            "• Text always · up to 1 PNG card/week (+ trades ≥100 BTC)\n"
+            "• ~{delay} min delay · no company/ETF alerts\n"
+            "• /holdings /stats /whales top 7 · Sunday text weekly"
+        ),
+        "start_premium_header": "⭐ PREMIUM tier — full multi-whale cards",
+        "start_premium_showcase": (
+            "5 random signal styles from real alerts:\n"
+            "1× Strategy · 2× companies (buy + sell) · 2× ETF (inflow + outflow)\n"
+            "Instant PNG · Tesla, MARA, Block, Metaplanet, IBIT, FBTC, GBTC, ARKB\n"
+            "Weekly PNG digest /weekly · /whales top 10\n"
+            "/subscribe — {stars} ⭐ / {days} days"
+        ),
+        "start_showcase_footer": (
+            "📋 /plans · /help (command wiki) · /disclaimer\n"
+            "Alerts turn on automatically after /start in a private chat."
         ),
         "start_btc_price": "🟡 BTC price: {price} (CoinGecko)",
+        "start_showcase_skip": "ℹ️ Card preview unavailable (image engine offline).",
         "status_online": "✅ Bot online",
         "status_uptime": "⏱ Uptime: {uptime}",
         "status_balance": "🏢 {name}\n💰 {btc} BTC (~{usd})\n📡 Source: {source}",
@@ -65,22 +78,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "source_coingecko": "CoinGecko",
         "help_body": (
             "SaylorWatchBot — help\n\n"
-            "🏦 /holdings — treasury overview\n"
-            "📊 /stats — avg price, cost basis & PnL\n"
-            "🟠 /buy — latest Bitcoin purchase\n"
-            "📡 /status — bot status & baseline\n"
-            "🌐 /site — raw data from strategy.com\n"
-            "🐋 /whales — top 10 BTC holders ranking\n"
-            "💎 /plans — Free vs Premium features\n"
-            "📋 /mysub — your subscription status\n"
-            "⭐ /subscribe — Premium via Telegram Stars\n"
-            "📊 /weekly — Premium weekly digest (PNG)\n"
-            "📣 /social — X, Reddit & Discord\n"
-            "🔔 Auto alerts (with image cards) on every buy & sell\n\n"
-            "Admin: /check /baseline /checkbuy /checksell /testalert /setsub /botstats\n"
-            "/chatid /info /uptime /clear /restart\n\n"
+            "Tap ❓ Help or send /help for the full command mini wiki.\n"
             "Version: {version}"
         ),
+        "help_wiki_note": "See command glossary above · /disclaimer for legal notice",
         "testalert_sent": "✅ Test alert sent to Chat ID {chat_id}.",
         "testalert_fail": "❌ Send failed: {error}\nCheck /chatid and X_CHAT_ID on hosting.",
         "testalert_message": "✅ Test: alerts are working. Purchase & sale monitoring is on.",
@@ -88,6 +89,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "check_holdings_line": "Holdings: {result}",
         "check_site_line": "Strategy.com: {result}",
         "check_fetch_error": "Could not fetch data (strategy.com / CoinGecko)",
+        "check_delivery_failed": "⚠️ Alert could not be delivered to any recipient. Baseline unchanged.",
         "check_baseline_saved": "Baseline saved: {btc} BTC",
         "check_no_change": "No change. Now {current} BTC, baseline {baseline} BTC (threshold {threshold} BTC).",
         "check_purchase_sent": "Purchase alert sent: +{delta} BTC",
@@ -257,7 +259,10 @@ TEXTS: dict[str, dict[str, str]] = {
             "Contact support with your payment receipt: {email}"
         ),
         "mysub_title": "📋 Your subscription",
-        "mysub_free": "🆓 Plan: **Free**\nStrategy alerts with ~30 min delay · /whales top 5 · no image cards.",
+        "mysub_free": (
+            "🆓 Plan: **Free**\n"
+            "Strategy alerts with ~{delay} min delay · /whales top {free_top} · no image cards."
+        ),
         "mysub_premium": "⭐ Plan: **Premium** (active)",
         "mysub_premium_until": "⭐ Plan: **Premium**\nValid until: {date}\nDays left: {days}",
         "mysub_expired": "🆓 Plan: **Free**\nPremium expired on {date}. Use /plans to compare tiers.",
@@ -265,7 +270,7 @@ TEXTS: dict[str, dict[str, str]] = {
             "⏳ **Premium expiring soon**\n\n"
             "Days left: **{days}**\n"
             "Expires: **{date}**\n\n"
-            "After expiry: Free tier (Strategy only, +30 min delay, no image cards).\n"
+            "After expiry: Free tier (Strategy only, ~{delay} min delay, /whales top {free_top}, no image cards).\n"
             "Renew: /subscribe · Status: /mysub"
         ),
         "premium_expiry_reminder_founding": "🎁 Gift subscription (founding promo · spot #{slot})",
@@ -300,6 +305,15 @@ TEXTS: dict[str, dict[str, str]] = {
         ),
         "weekly_sent": "✅ Weekly digest sent ({period}).",
         "weekly_fail": "❌ Could not build weekly digest. Try again later.",
+        "weekly_export_prompt": "🖨 Printable report — choose format:",
+        "weekly_export_pdf": "PDF",
+        "weekly_export_html": "HTML 🖨",
+        "weekly_export_csv": "CSV table",
+        "weekly_export_table": "Text table",
+        "weekly_export_sent": "📎 {label} · {period}",
+        "weekly_export_expired": "Report data expired. Run /weekly again to refresh exports.",
+        "weekly_export_fail": "❌ Could not build export. Try /weekly again.",
+        "weekly_export_building": "⏳ Building {label}…",
         "weekly_caption": (
             "📊 Premium Weekly Digest · v2\n"
             "{period}\n"
@@ -362,6 +376,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "lbl_pnl": "💰 Unrealized PnL",
         "lbl_last_buy": "🟠 Last Buy",
         "lbl_buy_price": "🟠 Buy Price",
+        "lbl_date": "📅 {date}",
         "lbl_source": "📡 Source",
         "source_strategy_short": "Strategy",
         "source_coingecko_short": "CoinGecko",
@@ -464,19 +479,32 @@ TEXTS: dict[str, dict[str, str]] = {
         "deny_admin": "⛔ Только для админа.\nUser ID: {user_id}\nНужен /chatid",
         "chatid_help": "Для X_CHAT_ID:\nChat ID: {chat_id}\nUser ID: {user_id}\n\nВ личке обычно совпадают.\nНе используйте ID бота.",
         "start_intro": (
-            "SaylorWatchBot — BTC-аналитика по Strategy.\n\n"
-            "🏦 /holdings — баланс казны\n"
-            "📊 /stats — ср. цена и PnL\n"
-            "🟠 /buy — последняя покупка\n"
-            "🔔 Авто-алерты на каждую покупку и продажу\n\n"
-            "💎 Premium — все киты, карточки, ETF-потоки\n"
-            "   /plans — Free vs Premium\n"
-            "   /subscribe — {stars} ⭐ / {days} дн.\n"
-            "   /mysub — статус подписки\n"
-            "   📊 /weekly — Premium PNG-сводка (вс 12:00 NY)\n\n"
-            "Источник: Strategy · Сборка: {version}"
+            "🟠 SaylorWatch — алерты по BTC-китам с PNG-карточками.\n\n"
+            "Ниже — примеры сигналов: 🆓 Free и ⭐ Premium.\n"
+            "Тарифы: /plans · Premium: /subscribe ({stars} ⭐ / {days} дн.)\n"
+            "Сборка: {version}"
+        ),
+        "start_free_header": "🆓 Тариф FREE — что получаете",
+        "start_free_showcase": (
+            "Пример: алерты о ПОКУПКАХ Strategy (Saylor).\n"
+            "• Текст всегда · до 1 PNG/нед (+ сделки ≥100 BTC)\n"
+            "• Задержка ~{delay} мин · без алертов компаний и ETF\n"
+            "• /holdings /stats /whales топ-7 · текстовая сводка по вс"
+        ),
+        "start_premium_header": "⭐ Тариф PREMIUM — все карточки китов",
+        "start_premium_showcase": (
+            "5 случайных стилей сигналов из реальных алертов:\n"
+            "1× Strategy · 2× компании (buy + sell) · 2× ETF (inflow + outflow)\n"
+            "Мгновенные PNG · Tesla, MARA, Block, Metaplanet, IBIT, FBTC, GBTC, ARKB\n"
+            "Weekly PNG /weekly · /whales топ-10\n"
+            "/subscribe — {stars} ⭐ / {days} дн."
+        ),
+        "start_showcase_footer": (
+            "📋 /plans · /help (мини-вики команд) · /disclaimer\n"
+            "Алерты включаются после /start в личном чате."
         ),
         "start_btc_price": "🟡 Цена BTC: {price} (CoinGecko)",
+        "start_showcase_skip": "ℹ️ Превью карточек недоступно (нет Pillow на сервере).",
         "status_online": "✅ Бот онлайн",
         "status_uptime": "⏱ Аптайм: {uptime}",
         "status_balance": "🏢 {name}\n💰 {btc} BTC (~{usd})\n📡 Источник: {source}",
@@ -489,22 +517,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "source_coingecko": "CoinGecko",
         "help_body": (
             "SaylorWatchBot — справка\n\n"
-            "🏦 /holdings — баланс казны\n"
-            "📊 /stats — ср. цена, затраты и PnL\n"
-            "🟠 /buy — последняя покупка BTC\n"
-            "📡 /status — статус бота и baseline\n"
-            "🌐 /site — данные с strategy.com\n"
-            "🐋 /whales — топ-10 держателей BTC\n"
-            "💎 /plans — Free vs Premium\n"
-            "📋 /mysub — статус подписки\n"
-            "⭐ /subscribe — Premium через Telegram Stars\n"
-            "📊 /weekly — Premium еженедельная сводка (PNG)\n"
-            "📣 /social — X, Reddit и Discord\n"
-            "🔔 Авто-алерты (с image-карточками) на покупки и продажи\n\n"
-            "Админ: /check /baseline /checkbuy /checksell /testalert /setsub /botstats\n"
-            "/chatid /info /uptime /clear /restart\n\n"
+            "Кнопка ❓ Помощь или /help — полная мини-вики команд.\n"
             "Версия: {version}"
         ),
+        "help_wiki_note": "Глоссарий команд выше · юридически: /disclaimer",
         "testalert_sent": "✅ Тест отправлен в Chat ID {chat_id}.",
         "testalert_fail": "❌ Ошибка: {error}\nПроверьте /chatid и X_CHAT_ID.",
         "testalert_message": "✅ Тест: уведомления работают. Мониторинг покупок и продаж включён.",
@@ -512,6 +528,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "check_holdings_line": "Баланс: {result}",
         "check_site_line": "Strategy.com: {result}",
         "check_fetch_error": "Не удалось получить данные (strategy.com / CoinGecko)",
+        "check_delivery_failed": "⚠️ Алерт никому не доставлен. Baseline не изменён.",
         "check_baseline_saved": "Baseline сохранён: {btc} BTC",
         "check_no_change": "Без изменений. Сейчас {current} BTC, baseline {baseline} BTC (порог {threshold} BTC).",
         "check_purchase_sent": "Алерт покупки: +{delta} BTC",
@@ -681,7 +698,10 @@ TEXTS: dict[str, dict[str, str]] = {
             "Напишите в поддержку с чеком: {email}"
         ),
         "mysub_title": "📋 Ваша подписка",
-        "mysub_free": "🆓 Тариф: **Free**\nАлерты Strategy с задержкой ~30 мин · /whales топ-5 · без карточек.",
+        "mysub_free": (
+            "🆓 Тариф: **Free**\n"
+            "Алерты Strategy с задержкой ~{delay} мин · /whales топ-{free_top} · без карточек."
+        ),
         "mysub_premium": "⭐ Тариф: **Premium** (активна)",
         "mysub_premium_until": "⭐ Тариф: **Premium**\nДействует до: {date}\nОсталось дней: {days}",
         "mysub_expired": "🆓 Тариф: **Free**\nPremium истёк {date}. Сравнение: /plans",
@@ -689,7 +709,7 @@ TEXTS: dict[str, dict[str, str]] = {
             "⏳ **Premium скоро закончится**\n\n"
             "Осталось дней: **{days}**\n"
             "Действует до: **{date}**\n\n"
-            "После окончания: Free (только Strategy, +30 мин, без карточек).\n"
+            "После окончания: Free (Strategy, ~{delay} мин, /whales топ-{free_top}, без карточек).\n"
             "Продлить: /subscribe · Статус: /mysub"
         ),
         "premium_expiry_reminder_founding": "🎁 Подарочная подписка (акция · место #{slot})",
@@ -724,6 +744,15 @@ TEXTS: dict[str, dict[str, str]] = {
         ),
         "weekly_sent": "✅ Еженедельная сводка отправлена ({period}).",
         "weekly_fail": "❌ Не удалось собрать сводку. Попробуйте позже.",
+        "weekly_export_prompt": "🖨 Справка для печати — выберите формат:",
+        "weekly_export_pdf": "PDF",
+        "weekly_export_html": "HTML 🖨",
+        "weekly_export_csv": "CSV таблица",
+        "weekly_export_table": "Текст таблица",
+        "weekly_export_sent": "📎 {label} · {period}",
+        "weekly_export_expired": "Данные отчёта устарели. Запустите /weekly снова.",
+        "weekly_export_fail": "❌ Не удалось собрать экспорт. Попробуйте /weekly снова.",
+        "weekly_export_building": "⏳ Готовлю {label}…",
         "weekly_caption": (
             "📊 Premium Weekly Digest · v2\n"
             "{period}\n"
@@ -778,6 +807,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "lbl_pnl": "💰 Бумажная прибыль",
         "lbl_last_buy": "🟠 Покупка",
         "lbl_buy_price": "🟠 Цена покупки",
+        "lbl_date": "📅 {date}",
         "lbl_source": "📡 Источник",
         "source_strategy_short": "Strategy",
         "source_coingecko_short": "CoinGecko",

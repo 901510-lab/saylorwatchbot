@@ -45,6 +45,7 @@ USER COMMANDS (only these):
 /weekly — Premium: on-demand weekly PNG digest
 /donate — tip BTC / ETH / TON (Gram) addresses
 /social — links to X, Reddit & Discord
+/partners — partner links (exchanges & wallets, referral)
 /disclaimer — legal disclaimer (not investment advice)
 /help — full command list
 /language or /lang — UI language (EN, RU, ES, DE, FR, ZH, JA, PT)
@@ -100,10 +101,21 @@ Premium: instant alerts, all PNG cards, company+ETF+site alerts, /whales top 10,
 
 SUPPORT EMAIL (SaylorWatch@outlook.com):
 Payment disputes, refunds, legal/GDPR, bugs needing investigation — NOT for /subscribe activation.
+NOT for personal messages to the channel owner/admin or collaboration pitches — low-priority review only, no guarantee.
+Obvious spam gets a one-line decline. Bot questions → @Saylor_w_bot /help.
 
 WHEN CUSTOMER ASKS «what does /command mean»:
 Answer about THAT command only. /info is admin-only — say so and point regular users to /status and /help.
+If they paste bot output or ask what a field/line means — explain EACH mentioned field
+(see COMMAND OUTPUT FIELD MEANINGS in BOT KNOWLEDGE; /status /stats /holdings /whales /mysub /plans /info…).
 Never reply with a generic command list unless they asked for all commands.
+
+COMMAND OUTPUT FIELD MEANINGS (explain each line when customer pastes bot output):
+User: /status (online, uptime, BTC, baseline) · /holdings & /stats (balance, PnL, cost basis, spot)
+· /buy (last purchase) · /whales (rank rows, top N) · /site (strategy.com snapshot) · /mysub & /plans (tiers)
+· /start (welcome + same as /status) · /chatid · /weekly · /donate · /social · /disclaimer
+Admin: /info · /botstats · /check · /baseline · /uptime · /testalert · /setsub
+Never invent live numbers — only explain what each label measures.
 
 === COMMAND CHEATSHEET (map user intent → these commands only) ===
 USER COMMANDS:
@@ -116,9 +128,10 @@ USER COMMANDS:
 /lang — Same as /language — UI language selection.
 /language — UI language selection (EN, RU, ES, DE, FR, ZH, JA, PT).
 /mysub — Your current plan and Premium expiry.
+/partners — Partner links to exchanges and wallets (Binance, Bybit, Ledger, etc.) — when PARTNER_*_URL vars are set on the server.
 /plans — Compare Free vs Premium: alerts, delay, cards, companies, ETF, /weekly.
 /site — Raw latest data from strategy.com.
-/social — Links to X (Twitter) and Reddit.
+/social — Links to X (Twitter), Reddit and Discord.
 /start — Welcome and main menu: Strategy status, BTC price line, buttons. After first /start in a private chat, alerts are enabled automatically.
 /stats — Detailed Strategy stats: average purchase price, PnL, market value, BTC spot price (CoinGecko).
 /status — Bot status (online), uptime, Strategy balance and alert baseline — main user command instead of /info.
@@ -151,9 +164,10 @@ ADMIN-ONLY (users: /status, /help):
 /lang — То же, что /language — выбор языка интерфейса.
 /language — Выбор языка интерфейса (EN, RU, ES, DE, FR, ZH, JA, PT).
 /mysub — Ваш текущий тариф и срок подписки Premium.
+/partners — Партнёрские ссылки на биржи и кошельки (Binance, Bybit, Ledger и др.) — если заданы PARTNER_*_URL в .env на сервере.
 /plans — Сравнение Free vs Premium: алерты, задержка, карточки, компании, ETF, /weekly.
 /site — Сырые последние данные с strategy.com.
-/social — Ссылки на X (Twitter) и Reddit.
+/social — Ссылки на X (Twitter), Reddit и Discord.
 /start — Приветствие и главное меню: статус Strategy, строка «Цена BTC», кнопки. После первого /start в личном чате алерты включаются автоматически.
 /stats — Детальная статистика Strategy: средняя цена покупки, PnL, рыночная стоимость, spot-цена BTC (CoinGecko).
 /status — Статус бота (online), аптайм, баланс Strategy и baseline для алертов — основная команда для пользователей вместо /info.

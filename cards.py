@@ -373,3 +373,135 @@ def _render_weekly_digest(data: WeeklyDigestCardData) -> io.BytesIO:
     out.seek(0)
     out.name = "weekly_digest.png"
     return out
+
+
+def thumbnail_card(png: io.BytesIO, *, max_width: int = 420) -> io.BytesIO | None:
+    """Уменьшенная копия карточки для витрины /start."""
+    if not PIL_AVAILABLE:
+        return None
+    try:
+        png.seek(0)
+        img = Image.open(png).convert("RGBA")
+        w, h = img.size
+        if w > max_width:
+            ratio = max_width / w
+            img = img.resize((max_width, int(h * ratio)), Image.Resampling.LANCZOS)
+        out = io.BytesIO()
+        img.convert("RGB").save(out, format="PNG", optimize=True)
+        out.seek(0)
+        out.name = getattr(png, "name", "card_thumb.png") or "card_thumb.png"
+        return out
+    except Exception:
+        logger.exception("thumbnail_card failed")
+        return None
+
+
+def compose_showcase_grid(
+    images: list[io.BytesIO],
+    *,
+    title: str = "",
+    cols: int = 3,
+    thumb_w: int = 300,
+    padding: int = 14,
+    bg: tuple[int, int, int] = BG,
+) -> io.BytesIO | None:
+    """Коллаж 2+ рядов — для Premium (5 карточек) на /start и соцсети."""
+    if not PIL_AVAILABLE or not images:
+        return None
+    try:
+        thumbs: list[Image.Image] = []
+        for buf in images:
+            buf.seek(0)
+            im = Image.open(buf).convert("RGB")
+            if im.width != thumb_w:
+                ratio = thumb_w / im.width
+                im = im.resize((thumb_w, int(im.height * ratio)), Image.Resampling.LANCZOS)
+            thumbs.append(im)
+        if not thumbs:
+            return None
+
+        rows: list[list[Image.Image]] = []
+        for i in range(0, len(thumbs), cols):
+            rows.append(thumbs[i : i + cols])
+
+        row_h = max(im.height for im in thumbs)
+        row_w = cols * thumb_w + (cols - 1) * padding
+        title_h = 52 if title else 0
+        height = padding * 2 + title_h + len(rows) * row_h + (len(rows) - 1) * padding
+        width = padding * 2 + row_w
+
+        canvas = Image.new("RGB", (width, height), bg)
+        draw = ImageDraw.Draw(canvas)
+        if title:
+            f_title = _load_font(26, bold=True)
+            draw.text((padding, padding), title.upper(), font=f_title, fill=ORANGE_SOFT)
+
+        y = padding + title_h
+        for row in rows:
+            x = padding
+            for im in row:
+                canvas.paste(im, (x, y + (row_h - im.height) // 2))
+                x += thumb_w + padding
+            y += row_h + padding
+
+        out = io.BytesIO()
+        canvas.save(out, format="PNG", optimize=True)
+        out.seek(0)
+        out.name = "showcase_grid.png"
+        return out
+    except Exception:
+        logger.exception("compose_showcase_grid failed")
+        return None
+
+
+def compose_showcase_collage(
+    images: list[io.BytesIO],
+    *,
+    title: str = "",
+    padding: int = 16,
+    bg: tuple[int, int, int] = BG,
+) -> io.BytesIO | None:
+    """Коллаж мини-карточек для соцсетей (горизонтальная сетка)."""
+    if not PIL_AVAILABLE or not images:
+        return None
+    try:
+        opened: list[Image.Image] = []
+        for buf in images:
+            buf.seek(0)
+            opened.append(Image.open(buf).convert("RGB"))
+        if not opened:
+            return None
+
+        thumb_w = min(380, max(im.width for im in opened))
+        thumbs: list[Image.Image] = []
+        for im in opened:
+            if im.width != thumb_w:
+                ratio = thumb_w / im.width
+                im = im.resize((thumb_w, int(im.height * ratio)), Image.Resampling.LANCZOS)
+            thumbs.append(im)
+
+        row_h = max(im.height for im in thumbs)
+        title_h = 56 if title else 0
+        width = padding * 2 + sum(im.width for im in thumbs) + padding * (len(thumbs) - 1)
+        height = padding * 2 + title_h + row_h
+
+        canvas = Image.new("RGB", (width, height), bg)
+        draw = ImageDraw.Draw(canvas)
+        if title:
+            f_title = _load_font(28, bold=True)
+            draw.text((padding, padding), title.upper(), font=f_title, fill=ORANGE_SOFT)
+
+        y = padding + title_h
+        x = padding
+        for im in thumbs:
+            canvas.paste(im, (x, y + (row_h - im.height) // 2))
+            x += im.width + padding
+
+        out = io.BytesIO()
+        canvas.save(out, format="PNG", optimize=True)
+        out.seek(0)
+        out.name = "showcase_collage.png"
+        return out
+    except Exception:
+        logger.exception("compose_showcase_collage failed")
+        return None

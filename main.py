@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import io
 import json
 import logging
 import os
@@ -106,6 +107,11 @@ from weekly_digest import (
     digest_enabled,
     weekly_digest_scheduler,
 )
+from weekly_report_export import (
+    build_weekly_export,
+    cache_weekly_digest,
+    get_cached_weekly_digest,
+)
 from paper_wallet import (
     PAPER_WALLET_POST_HOUR,
     PAPER_WALLET_POST_MINUTE,
@@ -116,6 +122,7 @@ from paper_wallet import (
 from whales import collect_whale_rankings, format_whales_message
 from models import EntityType
 from cards import CardData, generate_card
+from bot_help_wiki import format_help_wiki
 from i18n import (
     DEFAULT_LANG,
     LANG_NATIVE_NAMES,
@@ -141,15 +148,9 @@ SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "SaylorWatch@outlook.com").strip
 SITE_URL = os.environ.get("SITE_URL", "").strip().rstrip("/")
 # Адреса для донатов (на оплату сервера). По умолчанию зашиты ниже,
 # при необходимости можно переопределить переменными окружения.
-DONATE_BTC = os.environ.get(
-    "DONATE_BTC", "bc1pg4tskj3gm2mnrqu792k9u872uzsaln5rwhteeru3l5duel0n2t3sjqmv9g"
-).strip()
-DONATE_ETH = os.environ.get(
-    "DONATE_ETH", "0xf5f3168488B9c2308E9306C87FB171f88c017847"
-).strip()
-DONATE_TON = os.environ.get(
-    "DONATE_TON", "UQDCbH9itAqqKiK6ijvpp9S5WWXi6Q-VGtr_Yru6NWpNwQ1c"
-).strip()
+DONATE_BTC = os.environ.get("DONATE_BTC", "").strip()
+DONATE_ETH = os.environ.get("DONATE_ETH", "").strip()
+DONATE_TON = os.environ.get("DONATE_TON", "").strip()
 # EVM chain id для deep-link (1 = Ethereum mainnet).
 DONATE_ETH_CHAIN = os.environ.get("DONATE_ETH_CHAIN", "1").strip() or "1"
 
@@ -261,22 +262,17 @@ BOT_COMMANDS = [
     BotCommand("stats", "Detailed treasury stats & PnL"),
     BotCommand("buy", "Latest Bitcoin purchase"),
     BotCommand("status", "Strategy BTC balance & baseline"),
-    BotCommand("check", "Run treasury check now"),
-    BotCommand("checkbuy", "Test purchase alert (admin)"),
-    BotCommand("checksell", "Test sale alert (admin)"),
-    BotCommand("baseline", "Reset baseline to live data"),
-    BotCommand("testalert", "Test notification delivery"),
     BotCommand("chatid", "Show your Telegram ID"),
-    BotCommand("help", "Help and menu"),
+    BotCommand("help", "Command mini wiki & glossary"),
     BotCommand("site", "Latest data from strategy.com"),
-    BotCommand("whales", "Top 10 BTC holders ranking"),
+    BotCommand("whales", "Top BTC holders ranking"),
     BotCommand("plans", "Free vs Premium features"),
     BotCommand("mysub", "Your subscription status"),
     BotCommand("subscribe", "Get Premium (Telegram Stars)"),
     BotCommand("weekly", "Premium weekly digest (PNG)"),
     BotCommand("donate", "Support the server (BTC / ETH / TON)"),
-    BotCommand("social", "Follow on X, Reddit & Discord"),
     BotCommand("partners", "Partner links (exchanges & wallets)"),
+    BotCommand("social", "Follow on X, Reddit & Discord"),
     BotCommand("disclaimer", "Legal disclaimer (not investment advice)"),
     BotCommand("language", "Choose interface language"),
 ]
@@ -645,15 +641,17 @@ def load_strategy_site_state() -> dict[str, Any]:
     if not STRATEGY_SITE_STATE_FILE.exists():
         return {}
     try:
-        data = read_json_file(STRATEGY_SITE_STATE_FILE, default={})
-        return data if isinstance(data, dict) else {}
+        with json_rw_lock(STRATEGY_SITE_STATE_FILE, default={}) as data:
+            return dict(data) if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
         logger.warning("Invalid strategy site state file: %s", STRATEGY_SITE_STATE_FILE)
         return {}
 
 
 def save_strategy_site_state(state: dict[str, Any]) -> None:
-    atomic_write_json(STRATEGY_SITE_STATE_FILE, state, indent=2)
+    with json_rw_lock(STRATEGY_SITE_STATE_FILE, default={}) as data:
+        data.clear()
+        data.update(state)
 
 
 def parse_strategy_purchases(next_data: dict[str, Any]) -> dict[str, Any] | None:
@@ -747,7 +745,7 @@ async def fetch_strategy_site_holdings() -> dict[str, Any] | None:
 def format_site_press_alert(press: dict[str, str], lang: str) -> str:
     lines = [t(lang, "alert_site_press"), press.get("title", "Press release")]
     if press.get("date"):
-        lines.append(f"Date: {press['date']}")
+        lines.append(t(lang, "lbl_date", date=press["date"]))
     if press.get("url"):
         lines.append(press["url"])
     return "\n".join(lines)
@@ -787,14 +785,14 @@ async def run_strategy_site_check(
         press_uid = press.get("uid")
         if press_uid and press_uid != state.get("last_press_uid") and is_btc_related_press(press.get("title", "")):
             if not initialize_only and send_alerts:
-                press_delivered = await send_holdings_alert(
+                press_instant, _press_queued = await send_holdings_alert(
                     bot,
                     format_site_press_alert(press, alert_lang()),
                     entity_id=STRATEGY_ENTITY_ID,
                     site_monitor=True,
                     text_for_lang=lambda lang: format_site_press_alert(press, lang),
                 )
-                if press_delivered > 0:
+                if press_instant + _press_queued > 0:
                     state["last_press_uid"] = press_uid
             notes.append(t(msg_lang, "site_note_press"))
 
@@ -818,7 +816,7 @@ async def run_strategy_site_check(
                     increased=True,
                     lang=alert_lang(),
                 )
-                delivered = await send_alert_with_card(
+                acq_instant, _acq_queued = await send_alert_with_card(
                     bot,
                     text=alert_text,
                     delta_btc=acq_count,
@@ -831,7 +829,7 @@ async def run_strategy_site_check(
                     stats=stats,
                     buy_price=acq_price,
                 )
-                if delivered > 0:
+                if acq_instant + _acq_queued > 0:
                     mark_site_acquisition_for_dedupe(acq_count)
                     if total_btc:
                         save_holdings_state(
@@ -1045,10 +1043,10 @@ async def send_holdings_alert(
     entity_id: str = "strategy",
     site_monitor: bool = False,
     text_for_lang=None,
-) -> int:
-    """Текстовый алерт (без карточки). text_for_lang(lang) — если нужен перевод."""
+) -> tuple[int, int]:
+    """Текстовый алерт (без карточки). Возвращает (instant, queued)."""
     builder = text_for_lang or (lambda lang: text)
-    instant, queued = await dispatch_alert(
+    return await dispatch_alert(
         bot,
         alert_chat_id(),
         entity_id=entity_id,
@@ -1058,7 +1056,6 @@ async def send_holdings_alert(
         admin_lang=alert_lang(),
         donate_footer_for_lang=donate_footer,
     )
-    return instant + queued
 
 
 async def send_alert_with_card(
@@ -1076,8 +1073,8 @@ async def send_alert_with_card(
     site_monitor: bool = False,
     stats: dict[str, Any] | None = None,
     buy_price: float = 0.0,
-) -> int:
-    """Шлёт alert с image-карточкой (или текстом) с учётом тарифа — День 19."""
+) -> tuple[int, int]:
+    """Шлёт alert с image-карточкой. Возвращает (instant, queued)."""
     card_title = card_title_for_entity(entity, increased=increased)
     delta_str = f"{'+' if increased else '−'}{format_btc(abs(delta_btc))} BTC"
     if is_etf:
@@ -1175,7 +1172,7 @@ async def send_alert_with_card(
         write_log("⚠️ Card unavailable; text alert dispatched")
     elif card is not None and n == 0:
         write_log("⚠️ No alert recipients for entity " + entity_id)
-    return n
+    return instant, queued
 
 
 async def run_holdings_check(
@@ -1265,7 +1262,7 @@ async def run_holdings_check(
             ),
         )
 
-    delivered = await send_alert_with_card(
+    alert_instant, _alert_queued = await send_alert_with_card(
         bot,
         text=alert_text,
         delta_btc=delta,
@@ -1277,15 +1274,15 @@ async def run_holdings_check(
         stats=stats,
         buy_price=buy_price if increased else 0.0,
     )
-    if delivered > 0:
+    if alert_instant + _alert_queued > 0:
         save_holdings_state(holdings)
         if increased:
             write_log(f"🚨 Purchase: +{format_btc(delta)} BTC")
             return "ok", "purchase_sent", t(msg_lang, "check_purchase_sent", delta=format_btc(delta))
         write_log(f"🚨 Sale: {format_btc(delta)} BTC")
         return "ok", "sale_sent", t(msg_lang, "check_sale_sent", delta=format_btc(delta))
-    write_log(f"⚠️ Alert not delivered (0 recipients) — baseline kept")
-    return "error", "delivery_failed", t(msg_lang, "check_fetch_error")
+    write_log(f"⚠️ Alert not delivered (0 instant, 0 queued) — baseline kept")
+    return "error", "delivery_failed", t(msg_lang, "check_delivery_failed")
 
 
 # === Commands ===
@@ -1297,6 +1294,11 @@ def site_link_line(lang: str) -> str:
 
 
 async def build_start_text(lang: str) -> str:
+    return build_start_intro_fast(lang)
+
+
+def build_start_intro_fast(lang: str) -> str:
+    """Приветствие /start без сетевых запросов — мгновенно."""
     intro = t(
         lang,
         "start_intro",
@@ -1304,9 +1306,6 @@ async def build_start_text(lang: str) -> str:
         stars=PREMIUM_STARS_PRICE,
         days=PREMIUM_BILLING_DAYS,
     )
-    btc_price = await fetch_btc_spot_price()
-    if btc_price:
-        intro += "\n\n" + t(lang, "start_btc_price", price=format_usd(btc_price))
     if donate_configured():
         intro += "\n" + t(lang, "donate_footer")
     intro += social_footer(lang)
@@ -1321,8 +1320,100 @@ async def build_start_text(lang: str) -> str:
     site_line = site_link_line(lang)
     if site_line:
         intro += "\n" + site_line
-    intro += "\n\n" + t(lang, "disclaimer_short")
     return intro
+
+
+async def build_start_btc_line(lang: str) -> str:
+    btc_price = await fetch_btc_spot_price()
+    if btc_price:
+        return t(lang, "start_btc_price", price=format_usd(btc_price))
+    return ""
+
+
+async def send_start_followup(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    lang: str,
+) -> None:
+    """BTC spot и status — после карточек, не блокирует витрину."""
+    chat_id = update.effective_chat.id
+    try:
+        btc_line = await build_start_btc_line(lang)
+        if btc_line:
+            await context.bot.send_message(chat_id=chat_id, text=btc_line)
+    except Exception:
+        logger.exception("start btc line failed")
+    try:
+        await status(update, context, show_menu=False)
+    except Exception:
+        logger.exception("start status followup failed")
+
+
+async def send_plan_showcase(bot: Bot, chat_id: int, lang: str) -> None:
+    """Мини-карточки Free и Premium — из кэша (мгновенно после прогрева)."""
+    from plan_showcase import (
+        get_cached_start_showcase,
+        showcase_enabled,
+        start_showcase_cache_ready,
+    )
+
+    if not showcase_enabled():
+        return
+
+    wiki_lang = lang if lang in {"ru", "en"} else "en"
+    if not start_showcase_cache_ready(wiki_lang):
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
+        except Exception:
+            pass
+    free_col, prem_col = await asyncio.to_thread(get_cached_start_showcase, wiki_lang)
+
+    async def _send_photo(img: io.BytesIO | None, caption: str) -> bool:
+        if img is None:
+            return False
+        img.seek(0)
+        try:
+            await bot.send_photo(chat_id=chat_id, photo=img, caption=caption)
+            return True
+        except Exception:
+            logger.exception("start showcase photo failed")
+            try:
+                img.seek(0)
+                await bot.send_photo(chat_id=chat_id, photo=img)
+                await bot.send_message(chat_id=chat_id, text=caption)
+                return True
+            except Exception:
+                logger.exception("start showcase photo fallback failed")
+                return False
+
+    if free_col or prem_col:
+        await bot.send_message(chat_id=chat_id, text=t(wiki_lang, "start_free_header"))
+        free_cap = t(
+            wiki_lang,
+            "start_free_showcase",
+            delay=FREE_ALERT_DELAY_MINUTES,
+        )
+        if free_col and not await _send_photo(free_col, free_cap):
+            await bot.send_message(chat_id=chat_id, text=t(wiki_lang, "start_showcase_skip"))
+
+    if prem_col:
+        await bot.send_message(chat_id=chat_id, text=t(wiki_lang, "start_premium_header"))
+        prem_cap = t(
+            wiki_lang,
+            "start_premium_showcase",
+            stars=PREMIUM_STARS_PRICE,
+            days=PREMIUM_BILLING_DAYS,
+        )
+        if not await _send_photo(prem_col, prem_cap):
+            await bot.send_message(chat_id=chat_id, text=t(wiki_lang, "start_showcase_skip"))
+
+    if not free_col and not prem_col:
+        await bot.send_message(chat_id=chat_id, text=t(wiki_lang, "start_showcase_skip"))
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=t(wiki_lang, "start_showcase_footer") + "\n\n" + t(wiki_lang, "disclaimer_short"),
+    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1334,9 +1425,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if param in {"social", "social_x", "social_reddit", "social_discord"}:
             await social_command(update, context)
             return
-    intro = await build_start_text(lang)
+    wiki_lang = lang if lang in {"ru", "en"} else "en"
+    intro = build_start_intro_fast(wiki_lang)
     await update.message.reply_text(intro, reply_markup=menu_keyboard(lang))
-    await status(update, context, show_menu=False)
+    await send_plan_showcase(context.bot, update.effective_chat.id, wiki_lang)
+    track_background_task(
+        context.application,
+        send_start_followup(update, context, lang),
+        "start-followup",
+    )
 
 
 async def disclaimer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1439,6 +1536,52 @@ async def share_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     args = [a.lower() for a in (context.args or [])]
+    if len(args) == 1 and args[0] == "schedule":
+        try:
+            from social_schedule import format_schedule_text
+
+            body = format_schedule_text()
+        except ImportError:
+            body = "Upload social_schedule.py to enable /share schedule"
+        await update.message.reply_text(body, reply_markup=menu_keyboard(lang))
+        return
+
+    if len(args) >= 2 and args[0] == "collage" and args[1] == "tiers":
+        from plan_showcase import (
+            build_start_showcase_images,
+            format_social_tiers_summary,
+            get_showcase_sets,
+        )
+
+        lang = user_lang(update)
+        wiki_lang = lang if lang in {"ru", "en"} else "en"
+        free_sigs, prem_sigs = get_showcase_sets()
+        free_col, prem_col = build_start_showcase_images(free_sigs, prem_sigs, wiki_lang)
+        summary = format_social_tiers_summary(wiki_lang)
+        await update.message.reply_text(f"📋 Social tiers summary:\n\n{summary}")
+        chat_id = update.effective_chat.id
+        if free_col:
+            free_col.seek(0)
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=free_col,
+                caption="🆓 Free · 2× Strategy BUY cards (/start preview)",
+            )
+        if prem_col:
+            prem_col.seek(0)
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=prem_col,
+                caption="⭐ Premium · 5 whale signal cards (/start preview)",
+            )
+        if not free_col and not prem_col:
+            await update.message.reply_text(t(lang, "start_showcase_skip"))
+        await update.message.reply_text(
+            "Tip: run `python3 scripts/export_social_tiers.py --lang "
+            f"{wiki_lang}` to save PNG + text to assets/social/"
+        )
+        return
+
     if len(args) < 2:
         await update.message.reply_text(
             t(lang, "share_usage", help=list_share_options()),
@@ -1446,8 +1589,9 @@ async def share_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    variant = args[2] if len(args) > 2 else None
     try:
-        body = format_share_message(args[0], args[1])
+        body = format_share_message(args[0], args[1], variant=variant)
     except ValueError as exc:
         await update.message.reply_text(
             f"{exc}\n\n{list_share_options()}",
@@ -1455,8 +1599,10 @@ async def share_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Plain text — удобно долго нажать и скопировать целиком.
-    await update.message.reply_text(f"📋 Copy for {args[0]} / {args[1]}:\n\n{body}")
+    label = f"{args[0]} / {args[1]}"
+    if variant:
+        label += f" / {variant}"
+    await update.message.reply_text(f"📋 Copy for {label}:\n\n{body}")
 
 
 async def status(
@@ -1650,26 +1796,7 @@ def append_subscribe_payment_hint(lang: str, offer: str) -> str:
     )
 
 
-def subscribe_pay_keyboard(lang: str) -> InlineKeyboardMarkup:
-    """Legacy helper — только кнопка Stars."""
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    t(
-                        lang,
-                        "subscribe_btn_pay",
-                        stars=PREMIUM_STARS_PRICE,
-                        days=PREMIUM_BILLING_DAYS,
-                    ),
-                    callback_data=SUBSCRIBE_PAY_CALLBACK,
-                )
-            ]
-        ]
-    )
-
-
-def build_subscribe_offer_text(
+def subscribe_action_keyboard(
     lang: str,
     *,
     extend: bool = False,
@@ -2007,7 +2134,13 @@ async def mysub_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sub and sub.plan == PlanId.PREMIUM and sub.expires_at:
             body = t(lang, "mysub_expired", date=sub.expires_at[:10])
         else:
-            body = t(lang, "mysub_free")
+            free_plan = PLANS[PlanId.FREE]
+            body = t(
+                lang,
+                "mysub_free",
+                delay=free_plan.strategy_alert_delay_minutes,
+                free_top=free_plan.whales_top_n,
+            )
 
     if user_claimed_founding(uid):
         slot = user_claim_slot(uid)
@@ -2151,16 +2284,20 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = user_lang(update)
-    help_text = t(
+    header = t(
         lang,
         "help_body",
+        version=BOT_VERSION,
+        free_top=PLANS[PlanId.FREE].whales_top_n,
+        premium_top=PLANS[PlanId.PREMIUM].whales_top_n,
         btn_status=t(lang, "btn_status"),
         btn_check=t(lang, "btn_check"),
         btn_baseline=t(lang, "btn_baseline"),
         btn_language=t(lang, "btn_language"),
         btn_hide_menu=t(lang, "btn_hide_menu"),
-        version=BOT_VERSION,
     )
+    wiki = format_help_wiki(lang if lang in {"ru", "en"} else "en")
+    help_text = f"{header}\n\n{wiki}"
     if donate_configured():
         help_text += "\n\n" + t(lang, "donate_footer")
     if social_links_configured():
@@ -2169,7 +2306,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if site_line:
         help_text += "\n" + site_line
     help_text += "\n\n" + t(lang, "disclaimer_short")
-    await update.message.reply_text(help_text, reply_markup=menu_keyboard(lang))
+    help_text += "\n" + t(lang, "help_wiki_note")
+
+    chat_id = update.effective_chat.id
+    if len(help_text) <= 4096:
+        await update.message.reply_text(help_text, reply_markup=menu_keyboard(lang))
+    else:
+        await update.message.reply_text(header, reply_markup=menu_keyboard(lang))
+        await context.bot.send_message(chat_id=chat_id, text=wiki)
+        footer = t(lang, "disclaimer_short") + "\n" + t(lang, "help_wiki_note")
+        await context.bot.send_message(chat_id=chat_id, text=footer, reply_markup=menu_keyboard(lang))
 
 
 async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2392,6 +2538,35 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+WEEKLY_EXPORT_PREFIX = "weekly_exp:"
+
+
+def weekly_export_keyboard(lang: str) -> InlineKeyboardMarkup:
+    prefix = WEEKLY_EXPORT_PREFIX
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(t(lang, "weekly_export_pdf"), callback_data=f"{prefix}pdf"),
+                InlineKeyboardButton(t(lang, "weekly_export_html"), callback_data=f"{prefix}html"),
+            ],
+            [
+                InlineKeyboardButton(t(lang, "weekly_export_csv"), callback_data=f"{prefix}csv"),
+                InlineKeyboardButton(t(lang, "weekly_export_table"), callback_data=f"{prefix}table"),
+            ],
+        ]
+    )
+
+
+def _weekly_export_label(lang: str, fmt: str) -> str:
+    key = {
+        "pdf": "weekly_export_pdf",
+        "html": "weekly_export_html",
+        "csv": "weekly_export_csv",
+        "table": "weekly_export_table",
+    }.get(fmt, "weekly_export_pdf")
+    return t(lang, key)
+
+
 async def weekly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = user_lang(update)
     uid = update.effective_user.id
@@ -2413,9 +2588,14 @@ async def weekly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_snapshot=False,
         )
         if sent and data:
+            cache_weekly_digest(uid, data)
             await update.message.reply_text(
                 t(lang, "weekly_sent", period=data.period_label),
                 reply_markup=menu_keyboard(lang),
+            )
+            await update.message.reply_text(
+                t(lang, "weekly_export_prompt"),
+                reply_markup=weekly_export_keyboard(lang),
             )
         else:
             await update.message.reply_text(
@@ -2426,6 +2606,54 @@ async def weekly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("weekly command failed")
         await update.message.reply_text(
             t(lang, "weekly_fail"),
+            reply_markup=menu_keyboard(lang),
+        )
+
+
+async def weekly_export_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query is None or not query.data or not query.data.startswith(WEEKLY_EXPORT_PREFIX):
+        return
+    await query.answer()
+    lang = user_lang(update)
+    uid = query.from_user.id
+    chat_id = query.message.chat.id if query.message else uid
+    if not is_admin(uid, chat_id) and effective_plan(uid) != PlanId.PREMIUM:
+        await query.message.reply_text(
+            t(lang, "weekly_premium_only"),
+            reply_markup=menu_keyboard(lang),
+        )
+        return
+
+    fmt = query.data[len(WEEKLY_EXPORT_PREFIX) :]
+    if fmt not in {"pdf", "html", "csv", "table"}:
+        return
+    label = _weekly_export_label(lang, fmt)
+    data = get_cached_weekly_digest(uid)
+    if data is None:
+        await query.message.reply_text(
+            t(lang, "weekly_export_expired"),
+            reply_markup=menu_keyboard(lang),
+        )
+        return
+
+    await query.message.reply_text(
+        t(lang, "weekly_export_building", label=label),
+        reply_markup=menu_keyboard(lang),
+    )
+    try:
+        export = build_weekly_export(data, fmt, lang)
+        bio = io.BytesIO(export.content)
+        bio.name = export.filename
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=bio,
+            caption=t(lang, "weekly_export_sent", label=label, period=data.period_label),
+        )
+    except Exception:
+        logger.exception("weekly export failed fmt=%s user=%s", fmt, uid)
+        await query.message.reply_text(
+            t(lang, "weekly_export_fail"),
             reply_markup=menu_keyboard(lang),
         )
 
@@ -2587,6 +2815,9 @@ async def site(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === Health check ===
 async def handle(request):
+    token = os.environ.get("HEALTHCHECK_TOKEN", "").strip()
+    if token and request.query.get("token") != token:
+        return web.Response(text="Forbidden", status=403)
     return web.Response(text="✅ SaylorWatchBot is alive")
 
 
@@ -2721,12 +2952,43 @@ async def _post_init(application: Application):
             "paper-wallet",
         )
 
+    try:
+        from social_schedule import reminder_enabled, social_x_reminder_scheduler
+
+        if reminder_enabled():
+            write_log("📅 X @paper_wallet_co post reminders: daily (see SOCIAL_X_REMINDER_*)")
+            track_background_task(
+                application,
+                social_x_reminder_scheduler(application.bot, log_fn=write_log),
+                "social-x-reminders",
+            )
+    except ImportError:
+        pass
+
     track_background_task(application, start_healthcheck_server(), "healthcheck-server")
     track_background_task(application, monitor_saylor_purchases(application.bot), "holdings-monitor")
     if ENABLE_ALIVE_PING:
         track_background_task(application, ping_alive(application.bot), "alive-ping")
 
     write_log("🧩 post_init complete")
+
+    try:
+        from plan_showcase import showcase_enabled, warm_start_showcase_cache
+
+        if showcase_enabled():
+
+            async def _warm_showcase_cache() -> None:
+                try:
+                    write_log("🖼 Warming start showcase cache (background)…")
+                    n = await asyncio.to_thread(warm_start_showcase_cache)
+                    write_log(f"🖼 Start showcase cache ready ({n} collages)")
+                except Exception as exc:
+                    logger.exception("Showcase cache warm failed")
+                    write_log(f"⚠️ Showcase cache warm failed: {exc}")
+
+            track_background_task(application, _warm_showcase_cache(), "start-showcase-warm")
+    except ImportError:
+        pass
 
 
 async def _post_shutdown(application: Application):
@@ -2769,6 +3031,9 @@ if __name__ == "__main__":
         CallbackQueryHandler(founding_promo_cancel_callback, pattern=f"^{FOUNDING_PROMO_CANCEL_CALLBACK}$")
     )
     app.add_handler(CommandHandler("weekly", weekly_command))
+    app.add_handler(
+        CallbackQueryHandler(weekly_export_callback, pattern=f"^{WEEKLY_EXPORT_PREFIX}")
+    )
     app.add_handler(CommandHandler("setsub", setsub_command))
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_command))

@@ -52,8 +52,8 @@ def file_lock(path: Path) -> Iterator[None]:
             import fcntl
 
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        except (ImportError, AttributeError, OSError):
-            pass
+        except (ImportError, AttributeError, OSError) as exc:
+            logger.warning("file_lock: fcntl unavailable for %s — lock disabled: %s", path, exc)
         yield
     finally:
         try:

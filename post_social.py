@@ -27,13 +27,14 @@ def main() -> int:
 
     platform = sys.argv[1].lower()
     kind = sys.argv[2].lower()
+    variant = sys.argv[3].lower() if len(sys.argv) > 3 else None
 
     if kind not in POST_KINDS:
         print(f"Unknown kind: {kind}. Valid: {', '.join(POST_KINDS)}")
         return 1
 
     try:
-        text = format_share_message(platform, kind)
+        text = format_share_message(platform, kind, variant=variant)
     except ValueError as exc:
         print(f"Error: {exc}")
         return 1

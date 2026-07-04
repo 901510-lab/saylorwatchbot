@@ -83,12 +83,8 @@ def _save(data: dict[str, Any]) -> None:
 
 
 def _save_locked(handle, data: dict[str, Any]) -> None:
-    payload = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False)
-    handle.seek(0)
-    handle.truncate()
-    handle.write(payload)
-    handle.flush()
-    os.fsync(handle.fileno())
+    """Deprecated — используйте _save (atomic_write_json)."""
+    _save(data)
 
 
 @contextmanager
@@ -184,7 +180,7 @@ def try_claim_founding_premium(user_id: int) -> FoundingClaimResult:
                 "claimed_at": _utc_now_iso(),
             }
         )
-        _save_locked(handle, {"claims": claims})
+        _save({"claims": claims})
 
     logger.info(
         "founding promo claimed user=%s slot=%s/%s days=%s",

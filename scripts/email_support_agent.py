@@ -78,9 +78,24 @@ from bot_knowledge import (
     resolve_faq_topic,
     detect_relaxed_faq_topic,
     is_bot_overview_question,
+    is_commands_list_question,
+    is_info_fields_question,
+    is_command_fields_question,
+    detect_output_command,
+    infer_command_from_fields,
+    COMMAND_FIELD_SPECS,
+    is_partners_question,
+    is_refund_escalation,
+    customer_wants_command_reference,
+    extract_mentioned_commands,
+    help_playbook_text,
+    help_wiki_email_appendix,
+    should_append_email_help_wiki,
+    playbook_fewshot_text,
     detect_subscribe_intent,
     command_cheatsheet_for_llm,
     command_cheatsheet_text,
+    command_explanation,
     is_etf_coverage_question,
     is_companies_coverage_question,
     is_privacy_question,
@@ -90,6 +105,9 @@ from bot_knowledge import (
     is_bot_created_question,
     is_start_command_question,
     is_weekly_report_question,
+    is_personal_offtopic_email,
+    detect_offtopic_topic,
+    PLAYBOOK_MINIMAL_REPLY,
     multi_faq_playbook_reply,
     topic_from_faq_hints,
 )
@@ -114,6 +132,11 @@ Rules:
 - NOT financial advice. Not affiliated with Strategy or Michael Saylor.
 - Subscription is activated IN @Saylor_w_bot — never «email us to subscribe».
 - Email SaylorWatch@outlook.com is for disputes, legal, bugs — not for activating Premium.
+- Personal mail to the channel admin, ads, or spam — decline politely;
+  no personal details about the team.
+  Obvious spam: one short sentence, no /help.
+  Other personal mail: bot support only; non-spam may be reviewed when time allows, no guarantee.
+  Bot questions → @Saylor_w_bot /help.
 - Write ONLY the email body. Numbered steps for how-to questions.
 - If NOT covered by BOT KNOWLEDGE — reply EXACTLY: UNCERTAIN: <short reason in English>"""
 
@@ -214,6 +237,8 @@ REASONING (do this mentally before writing):
 2) Map intent to 1–3 commands from COMMAND CHEATSHEET only — never invent commands.
 3) How-to questions (Premium, alerts, whales…) → numbered steps starting with Telegram → @Saylor_w_bot.
 4) «What does /X mean» → explain THAT command only; /info is admin-only → point to /status and /help.
+5) If they paste bot output (/status, /stats, /info, /whales…) — explain EACH mentioned line/field;
+   what the label measures, not guessing live numbers.
 
 OUTPUT FORMAT (follow exactly):
 1) One direct sentence answering YES/NO or the core question.
@@ -237,7 +262,11 @@ RULES:
 - If the question is outside FAQ facts — output ONLY: UNCERTAIN: <reason> (do not guess).
 - Do NOT mention Premium or /subscribe unless the customer asked about subscription/plans.
 - Subscription is in the Telegram bot only — never «email us to subscribe».
-- Max ~120 words."""
+- Max ~120 words.
+- Personal letters to the channel admin, CV/LinkedIn/portfolio pitches, dating, or obvious spam:
+  politely decline — no admin personal details, no social links.
+  Obvious spam: 1–2 sentences, no /help, no disclaimer.
+  Other personal mail: bot support only → @Saylor_w_bot /help if bot question."""
 
 BAD_REPLY_EXAMPLE = """BAD (never write like this):
 «…2. /all alerts…» or «/whales для курса» or «/companies» or «сначала Premium /subscribe».
@@ -419,6 +448,38 @@ def admin_notify_required(*, subject: str, body: str, reason: str) -> bool:
     return reason == "keyword-escalate"
 
 
+def admin_escalation_draft(*, subject: str, body: str) -> str:
+    """Черновик для админа при keyword-escalate (не отправляется клиенту)."""
+    blob = f"{subject}\n{body}".lower()
+    if is_refund_escalation(blob):
+        return (
+            "Запрос на возврат / chargeback.\n"
+            "Проверьте платёж Telegram Stars вручную. Клиенту уже ушло авто-подтверждение.\n"
+            "Не отправляйте инструкции /subscribe — это не активация, а возврат."
+        )
+    if any(
+        h in blob
+        for h in (
+            "partnership",
+            "партнёр",
+            "партнер",
+            "collaboration",
+            "купить ваш бот",
+            "buy your bot",
+            "acquire the bot",
+        )
+    ):
+        return (
+            "Запрос на партнёрство / покупку бота / сотрудничество.\n"
+            "Ответьте вручную. Клиенту ушло авто-подтверждение получения письма."
+        )
+    if any(h in blob for h in ("legal", "lawyer", "gdpr", "юрист", "удалите данные")):
+        return "Legal / GDPR — ответ вручную по политике конфиденциальности."
+    if any(h in blob for h in ("scam", "fraud", "жалоб")):
+        return "Жалоба / scam — проверить и ответить вручную."
+    return f"Эскалация: требуется ручной ответ.\n\nТема: {subject}\n\n{body[:1200]}"
+
+
 def save_state(path: Path, state: dict, *, already_locked: bool = False) -> None:
     lock_path = path.with_suffix(path.suffix + ".lock")
     if already_locked:
@@ -472,7 +533,7 @@ def ollama_chat(
             data = pool.submit(_call).result(timeout=timeout + 5)
     except FuturesTimeoutError as exc:
         raise RuntimeError(
-            f"Ollama timeout ({timeout}s) — playbook не сработал, будет ACK клиенту"
+            f"Ollama timeout ({timeout}s) — модель не успела ответить"
         ) from exc
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -522,6 +583,9 @@ def reply_signature(body: str) -> str:
     low = body.lower()
     if not any(m in low for m in _DISCLAIMER_MARKERS):
         body = f"{body}\n\n{email_disclaimer_for_text(body)}"
+    lang = _reply_lang("", body)
+    if should_append_email_help_wiki(body):
+        body = f"{body}\n\n{help_wiki_email_appendix(lang)}"
     return body + SIGNATURE
 
 
@@ -983,9 +1047,25 @@ def _customer_asks_api(*, subject: str, body: str) -> bool:
 def detect_faq_topic(*, subject: str, body: str) -> str | None:
     norm_subj = normalize_subject(subject)
     blob = build_faq_blob(subject=norm_subj or subject, body=body)
+    if is_commands_list_question(blob):
+        return "help"
+    out_cmd = detect_output_command(blob)
+    if out_cmd:
+        return f"command:{out_cmd}"
+    if is_command_fields_question(blob):
+        cmd = extract_question_command(blob) or detect_output_command(blob) or infer_command_from_fields(blob)
+        if cmd and cmd in COMMAND_FIELD_SPECS:
+            return f"command:{cmd}"
+        return "command:info"
+    mentioned = extract_mentioned_commands(blob)
+    if len(mentioned) >= 2:
+        return "help"
     cmd_topic = detect_command_topic(subject=norm_subj or subject, body=body)
     if cmd_topic:
         return cmd_topic
+    off = detect_offtopic_topic(blob)
+    if off:
+        return off
     if is_retail_buy_bitcoin_question(blob):
         return "not_exchange"
     if is_bot_created_question(blob) and not is_start_command_question(blob):
@@ -996,11 +1076,15 @@ def detect_faq_topic(*, subject: str, body: str) -> str | None:
         return detect_command_topic(subject=norm_subj or subject, body=body) or "command:start"
     if is_bot_overview_question(blob):
         return "what_is"
+    if is_partners_question(blob):
+        return "command:partners"
+    if is_refund_escalation(blob):
+        return None
     if detect_subscribe_intent(blob):
         return "subscribe"
     subj_low = (norm_subj or subject).strip().lower()
     if subj_low in {"help", "помощь", "support", "hi", "hello", "привет", "aide", "bonjour", "l"}:
-        if len(blob) < 25:
+        if len(blob) < 120:
             return "help"
     price_q = ("курс", "цена", "price", "prix", "cours", "сколько стоит", "котировк", "узнать")
     coin_w = ("биткоин", "биткойн", "bitcoin", " btc", "btc ", "btc\n")
@@ -1089,6 +1173,10 @@ def detect_faq_topic(*, subject: str, body: str) -> str | None:
 
 def faq_playbook_reply(*, subject: str, body: str) -> str | None:
     lang = _reply_lang(subject, body)
+    blob = faq_search_blob(subject=subject, raw_body=body)
+    if is_commands_list_question(blob) or len(extract_mentioned_commands(blob)) >= 2:
+        text = help_playbook_text(lang)
+        return reply_signature(text)
     multi_faq = multi_faq_playbook_reply(subject=subject, body=body, lang=lang)
     if multi_faq:
         return reply_signature(multi_faq)
@@ -1113,12 +1201,14 @@ def faq_playbook_reply(*, subject: str, body: str) -> str | None:
         return None
     if not topic.startswith("command:") and topic not in FAQ_PLAYBOOKS:
         return None
-    text = playbook_text_for_topic(topic, lang)
+    text = playbook_text_for_topic(topic, lang, context_blob=blob)
     if not text:
         return None
     if topic not in PLAYBOOK_NO_PS and topic != "help" and not topic.startswith("command:"):
         footer = MODEST_FOOTER.get(lang) or MODEST_FOOTER["en"]
         text = f"{text}\n\n{footer}"
+    if topic in PLAYBOOK_MINIMAL_REPLY:
+        return text.rstrip() + SIGNATURE
     return reply_signature(text)
 
 
@@ -1140,6 +1230,9 @@ def classify_auto_send(*, subject: str, body: str, dry_run: bool = False) -> tup
         return False, "keyword-escalate"
     if any(h in blob for h in escalate_hints):
         return False, "keyword-escalate"
+    off = detect_offtopic_topic(blob)
+    if off:
+        return True, f"offtopic-{off}"
     bug_phrases = ("bug report", "report a bug", "багрепорт", "сообщить об ошибке")
     if any(p in blob for p in bug_phrases):
         return False, "keyword-escalate"
@@ -1175,7 +1268,7 @@ def _few_shot_turns(*, max_pairs: int | None = None, prefer_topic: str | None = 
         shots = shots[: max(1, max_pairs)]
     turns: list[tuple[str, str]] = []
     for subj, body, topic, lang in shots:
-        gold = _playbook_text(topic, lang)
+        gold = playbook_fewshot_text(topic, lang)
         if not gold:
             continue
         user_turn = f"Subject: {subj}\n\n{body}\n\n---\nWrite the reply body."
@@ -1186,8 +1279,9 @@ def _few_shot_turns(*, max_pairs: int | None = None, prefer_topic: str | None = 
 
 def build_ollama_reply_system() -> str:
     model = cfg("OLLAMA_MODEL", "qwen2.5:3b").lower()
-    knowledge = "\n\n" + command_cheatsheet_for_llm() + "\n\n"
+    knowledge = ""
     if "saylorwatch-support" not in model:
+        knowledge = "\n\n" + command_cheatsheet_for_llm() + "\n\n"
         knowledge += "=== BOT KNOWLEDGE ===\n" + bot_knowledge_text(cfg) + "\n\n"
     return REPLY_PROMPT + "\n\n" + SYSTEM_PROMPT + knowledge + BAD_REPLY_EXAMPLE
 
@@ -1195,16 +1289,28 @@ def build_ollama_reply_system() -> str:
 def _customer_user_prompt(*, subject: str, body: str, from_hdr: str) -> str:
     topic = detect_faq_topic(subject=subject, body=body)
     hint = ""
-    if topic and topic in FAQ_PLAYBOOKS:
-        lang = _reply_lang(subject, body)
-        ref = _playbook_text(topic, lang)
-        hint = f"\n\nStyle reference for a similar question (do not copy blindly):\n{ref}"
-    elif re.search(r"/[a-z][a-z0-9]*", body.lower()):
-        lang = _reply_lang(subject, body)
+    if topic == "help":
         hint = (
-            f"\n\nRelevant command briefs (use COMMAND CHEATSHEET for facts):\n"
-            + command_cheatsheet_text(lang=lang, include_admin=False)[:1200]
+            "\n\nStyle: short command overview for the user; "
+            "/info is admin-only — point to /status and /help."
         )
+    elif topic and topic.startswith("command:"):
+        lang = _reply_lang(subject, body)
+        cmd = topic.split(":", 1)[1]
+        if cmd in COMMAND_FIELD_SPECS and is_command_fields_question(body):
+            ref = playbook_text_for_topic(topic, lang, context_blob=body)
+            hint = (
+                "\n\nReference — explain EACH field the customer pasted (do not copy blindly):\n"
+                f"{ref[:1400]}"
+            )
+        else:
+            brief = command_explanation(cmd, lang)
+            if brief:
+                hint = f"\n\nReference (do not copy blindly):\n{brief[:600]}"
+    elif topic and topic in FAQ_PLAYBOOKS:
+        lang = _reply_lang(subject, body)
+        ref = playbook_fewshot_text(topic, lang)
+        hint = f"\n\nStyle reference for a similar question (do not copy blindly):\n{ref}"
     return (
         f"From: {from_hdr}\nSubject: {subject}\n\n{body}\n\n---\nWrite the reply body.{hint}"
     )
@@ -1244,10 +1350,18 @@ def validate_llm_reply(text: str, *, customer_body: str = "", subject: str = "")
         return False
     if any(h in low for h in HEDGE_PHRASES):
         return False
+    blob = f"{subject} {customer_body}".lower()
+    broad_commands = customer_wants_command_reference(blob)
+    mentioned = set(extract_mentioned_commands(blob))
     for cmd in _extract_slash_commands(text):
-        blob = f"{subject} {customer_body}".lower()
+        if broad_commands:
+            if cmd in VALID_BOT_COMMANDS or cmd in ADMIN_ONLY_COMMANDS:
+                continue
+            return False
         asked = extract_question_command(blob) if is_command_question(blob) else None
         if asked and cmd == asked:
+            continue
+        if cmd in mentioned:
             continue
         if cmd in ADMIN_ONLY_COMMANDS or cmd not in VALID_BOT_COMMANDS:
             return False
@@ -1255,7 +1369,7 @@ def validate_llm_reply(text: str, *, customer_body: str = "", subject: str = "")
         w in f"{customer_body}".lower()
         for w in ("premium", "subscribe", "подписк", "премиум", "stars", "тариф", "plans")
     )
-    if not asked_premium and "/subscribe" in low:
+    if not broad_commands and not asked_premium and "/subscribe" in low:
         return False
     return True
 
@@ -1294,6 +1408,9 @@ def generate_reply_outcome(
     raw_body: str | None = None,
 ) -> ReplyOutcome:
     raw = raw_body if raw_body is not None else body
+    esc_blob = faq_search_blob(subject=subject, raw_body=raw).lower()
+    if is_refund_escalation(esc_blob):
+        return ReplyOutcome(None, False, "escalate", "refund")
     playbook = faq_playbook_reply(subject=subject, body=raw)
     if playbook:
         return ReplyOutcome(playbook, True, "playbook")
@@ -1305,7 +1422,7 @@ def generate_reply_outcome(
         topic = detect_faq_topic(subject=subject, body=core)
     if topic and topic in FAQ_PLAYBOOKS:
         lang = _reply_lang(subject, effective_customer_text(subject=subject, raw_body=raw))
-        text = playbook_text_for_topic(topic, lang)
+        text = playbook_text_for_topic(topic, lang, context_blob=search_blob)
         if text:
             return ReplyOutcome(reply_signature(text), True, "playbook-topic")
 
@@ -1313,7 +1430,7 @@ def generate_reply_outcome(
         cmd = extract_question_command(faq_search_blob(subject=subject, raw_body=raw).lower())
         if cmd:
             lang = _reply_lang(subject, effective_customer_text(subject=subject, raw_body=raw))
-            text = playbook_text_for_topic(f"command:{cmd}", lang)
+            text = playbook_text_for_topic(f"command:{cmd}", lang, context_blob=search_blob)
             if text:
                 return ReplyOutcome(reply_signature(text), True, "playbook")
         help_text = playbook_text_for_topic(
@@ -1323,6 +1440,15 @@ def generate_reply_outcome(
             return ReplyOutcome(reply_signature(help_text), True, "playbook")
         print("FAQ intent — Ollama пропущен")
         return ReplyOutcome(None, False, "uncertain", "faq playbook miss")
+
+    off = detect_offtopic_topic(search_blob.lower())
+    if off:
+        lang = _reply_lang(subject, effective_customer_text(subject=subject, raw_body=raw) or raw)
+        text = playbook_text_for_topic(off, lang)
+        if text:
+            if off in PLAYBOOK_MINIMAL_REPLY:
+                return ReplyOutcome(text.rstrip() + SIGNATURE, True, "playbook-offtopic")
+            return ReplyOutcome(reply_signature(text), True, "playbook-offtopic")
 
     core = effective_customer_text(subject=subject, raw_body=raw)
 
@@ -1337,7 +1463,7 @@ def generate_reply_outcome(
             dry_run=dry_run,
             system=build_ollama_reply_system(),
             few_shot=_few_shot_turns(
-                max_pairs=int(cfg("OLLAMA_FEW_SHOT_MAX", "4") or "4"),
+                max_pairs=int(cfg("OLLAMA_FEW_SHOT_MAX", "2") or "2"),
                 prefer_topic=detect_faq_topic(
                     subject=subject,
                     body=faq_search_blob(subject=subject, raw_body=raw),
@@ -2424,13 +2550,7 @@ def _process_one_message(
                     notify_uncertain = True
                     uncertain_detail = outcome.detail
         elif notify_admin:
-            esc = generate_reply_outcome(
-                subject=subj,
-                body=body,
-                from_hdr=item["from"],
-                dry_run=dry_run,
-            )
-            reply = esc.text if esc.confident and esc.text else ""
+            reply = admin_escalation_draft(subject=subj, body=raw_body)
         try:
             send_reply_retry(item["from_email"], reply_subject_line(subj), outbound)
             record_reply_fingerprint(state, fp)
@@ -2800,8 +2920,21 @@ def main() -> int:
     )
     parser.add_argument(
         "--test-reply",
+        nargs="?",
+        const="",
         metavar="TEXT",
-        help="Проверить ответ Ollama на текст письма (без отправки)",
+        help="Проверить ответ на письмо (без отправки). TEXT или --test-body",
+    )
+    parser.add_argument(
+        "--test-subject",
+        default="Test",
+        metavar="SUBJECT",
+        help="С --test-reply: тема письма (по умолчанию Test)",
+    )
+    parser.add_argument(
+        "--test-body",
+        metavar="TEXT",
+        help="С --test-reply: тело письма (альтернатива TEXT после --test-reply)",
     )
     parser.add_argument(
         "--force-ollama",
@@ -2840,38 +2973,54 @@ def main() -> int:
             )
             print(f"Test sent to {args.test_send}")
             return 0
-        if args.test_reply:
+        if args.test_reply is not None:
+            test_body = (args.test_body or args.test_reply or "").strip()
+            if not test_body:
+                parser.error("--test-reply: укажите TEXT или --test-body")
+            test_subject = args.test_subject or "Test"
             if args.force_ollama:
-                prompt = _customer_user_prompt(
-                    subject="Test",
-                    body=args.test_reply,
-                    from_hdr="Test User <test@example.com>",
-                )
-                prefer = detect_faq_topic(subject="Test", body=args.test_reply)
-                raw = ollama_chat(
-                    prompt,
-                    dry_run=args.dry_run,
-                    system=build_ollama_reply_system(),
-                    few_shot=_few_shot_turns(max_pairs=3, prefer_topic=prefer),
-                    options={"num_predict": 320},
-                )
-                ok, polished = parse_ollama_reply(
-                    raw, customer_body=args.test_reply, subject="Test"
-                )
-                if ok:
-                    print(f"[ollama OK]\n{reply_signature(polished)}")
-                else:
-                    print(f"[ollama UNCERTAIN — клиенту только ACK]\n{raw}")
+                try:
+                    prompt = _customer_user_prompt(
+                        subject=test_subject,
+                        body=test_body,
+                        from_hdr="Test User <test@example.com>",
+                    )
+                    prefer = detect_faq_topic(subject=test_subject, body=test_body)
+                    raw = ollama_chat(
+                        prompt,
+                        dry_run=args.dry_run,
+                        system=build_ollama_reply_system(),
+                        few_shot=_few_shot_turns(max_pairs=2, prefer_topic=prefer),
+                        options={"num_predict": 320},
+                    )
+                    ok, polished = parse_ollama_reply(
+                        raw, customer_body=test_body, subject=test_subject
+                    )
+                    if ok:
+                        print(f"[ollama OK]\n{reply_signature(polished)}")
+                    else:
+                        print(f"[ollama UNCERTAIN — fallback playbook]\n{raw}")
+                except RuntimeError as exc:
+                    print(f"Ollama: {exc} — fallback playbook")
+                    out = generate_reply_outcome(
+                        subject=test_subject,
+                        body=test_body,
+                        from_hdr="Test User <test@example.com>",
+                        dry_run=args.dry_run,
+                    )
+                    tag = "OK" if out.confident else "ACK ONLY"
+                    print(f"[{out.source} · {tag}]")
+                    print(out.text if out.confident and out.text else ack_reply(test_body))
             else:
                 out = generate_reply_outcome(
-                    subject="Test",
-                    body=args.test_reply,
+                    subject=test_subject,
+                    body=test_body,
                     from_hdr="Test User <test@example.com>",
                     dry_run=args.dry_run,
                 )
                 tag = "OK" if out.confident else "ACK ONLY"
                 print(f"[{out.source} · {tag}]")
-                print(out.text if out.confident and out.text else ack_reply(args.test_reply))
+                print(out.text if out.confident and out.text else ack_reply(test_body))
             return 0
         if args.setup_check:
             wait_for_services(dry_run=args.dry_run)

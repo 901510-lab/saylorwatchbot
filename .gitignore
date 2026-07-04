@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-social/
 last_holdings.json
 last_strategy_site.json
 user_languages.json

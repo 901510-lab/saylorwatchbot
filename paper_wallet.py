@@ -178,6 +178,37 @@ def mark_posted_today(
         payload["top_symbols"] = top_symbols
         payload["bottom_symbols"] = bottom_symbols
         payload["mid_symbols"] = mid_symbols
+        payload.pop("post_progress", None)
+
+
+_POST_STEP_NAMES = ("sep_top", "top_photo", "promo", "sep_bottom", "bottom_photo")
+
+
+def _load_post_progress(when: dt_datetime) -> dict[str, Any]:
+    state = load_state()
+    prog = state.get("post_progress")
+    if isinstance(prog, dict) and prog.get("date") == today_key(when):
+        done = prog.get("done")
+        if isinstance(done, list):
+            return {"date": today_key(when), "done": [str(x) for x in done]}
+    return {"date": today_key(when), "done": []}
+
+
+def _save_post_progress(prog: dict[str, Any]) -> None:
+    with json_rw_lock(STATE_FILE, default={}) as payload:
+        payload["post_progress"] = prog
+
+
+def _post_step_done(prog: dict[str, Any], step: str) -> bool:
+    return step in set(prog.get("done") or [])
+
+
+def _mark_post_step(prog: dict[str, Any], step: str) -> None:
+    done = list(prog.get("done") or [])
+    if step not in done:
+        done.append(step)
+    prog["done"] = done
+    _save_post_progress(prog)
 
 
 def _parse_row(raw: dict[str, Any]) -> MarketRow | None:
@@ -757,27 +788,49 @@ async def deliver_paper_wallet_daily(
     tickers = build_ticker_line(mid_symbols)
     sep_bottom = build_random_separator_block()
     channel = PAPER_WALLET_CHANNEL
+    progress = _load_post_progress(now)
 
     try:
-        await bot.send_message(chat_id=channel, text=sep_top)
-        top_png.seek(0)
-        msg1 = await bot.send_photo(
-            chat_id=channel,
-            photo=top_png,
-            caption=caption_for_block(kind="top", when=now),
-        )
-        await bot.send_message(chat_id=channel, text=tickers)
-        await bot.send_message(chat_id=channel, text=sep_bottom)
-        bottom_png.seek(0)
-        msg2 = await bot.send_photo(
-            chat_id=channel,
-            photo=bottom_png,
-            caption=caption_for_block(kind="bottom", when=now),
-        )
+        if not _post_step_done(progress, "sep_top"):
+            await bot.send_message(chat_id=channel, text=sep_top)
+            _mark_post_step(progress, "sep_top")
+
+        if not _post_step_done(progress, "top_photo"):
+            top_png.seek(0)
+            msg1 = await bot.send_photo(
+                chat_id=channel,
+                photo=top_png,
+                caption=caption_for_block(kind="top", when=now),
+            )
+            _mark_post_step(progress, "top_photo")
+        else:
+            msg1 = None
+
+        if not _post_step_done(progress, "promo"):
+            await bot.send_message(chat_id=channel, text=tickers)
+            _mark_post_step(progress, "promo")
+
+        if not _post_step_done(progress, "sep_bottom"):
+            await bot.send_message(chat_id=channel, text=sep_bottom)
+            _mark_post_step(progress, "sep_bottom")
+
+        if not _post_step_done(progress, "bottom_photo"):
+            bottom_png.seek(0)
+            msg2 = await bot.send_photo(
+                chat_id=channel,
+                photo=bottom_png,
+                caption=caption_for_block(kind="bottom", when=now),
+            )
+            _mark_post_step(progress, "bottom_photo")
+        else:
+            msg2 = None
     except Exception as exc:
         logger.exception("Paper Wallet post failed")
         if log_fn:
-            log_fn(f"⚠️ Paper Wallet post failed: {type(exc).__name__}: {exc}")
+            log_fn(
+                f"⚠️ Paper Wallet post failed after {len(progress.get('done') or [])}/"
+                f"{len(_POST_STEP_NAMES)} steps: {type(exc).__name__}: {exc}"
+            )
         return False
 
     mark_posted_today(
@@ -787,9 +840,10 @@ async def deliver_paper_wallet_daily(
         mid_symbols=mid_symbols,
     )
     if log_fn:
+        ids = [x for x in (msg1.message_id if msg1 else None, msg2.message_id if msg2 else None) if x]
         log_fn(
             f"📰 Paper Wallet posted → {channel} "
-            f"(top={msg1.message_id}, bottom={msg2.message_id})"
+            f"(message_ids={ids or 'resumed'})"
         )
     return True
 

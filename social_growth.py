@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 BOT_PUBLIC_URL = os.environ.get("BOT_PUBLIC_URL", "https://t.me/Saylor_w_bot").strip().rstrip("/")
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "Saylor_w_bot").strip().lstrip("@")
@@ -70,46 +72,81 @@ def bot_mention() -> str:
     return f"@{BOT_USERNAME}"
 
 
+def x_post_disclaimer() -> str:
+    """Короткий дисклеймер для постов X (NFA). Переопределение: SOCIAL_X_DISCLAIMER."""
+    custom = os.environ.get("SOCIAL_X_DISCLAIMER", "").strip()
+    if custom:
+        return custom
+    return "Not financial advice · informational only · DYOR."
+
+
+def _x_with_disclaimer(body: str, hashtags: str) -> str:
+    return f"{body.rstrip()}\n\n{x_post_disclaimer()}\n\n{hashtags}"
+
+
 # --- Шаблоны постов (EN — для X/Reddit; Reddit title + body) ---
 
-POST_KINDS = ("announce", "weekly", "whales", "reddit_comment")
+POST_KINDS = ("announce", "weekly", "whales", "tiers", "reddit_comment", "paper_wallet")
+PAPER_WALLET_VARIANTS = ("table", "whales", "intro")
 
 
-def render_x_post(kind: str, lang: str = "en") -> str:
+def _social_tz() -> ZoneInfo:
+    name = os.environ.get("SOCIAL_X_TIMEZONE", os.environ.get("PAPER_WALLET_TIMEZONE", "Europe/Moscow"))
+    name = name.strip() or "Europe/Moscow"
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return ZoneInfo("Europe/Moscow")
+
+
+def render_x_post(kind: str, lang: str = "en", *, variant: str | None = None) -> str:
     link = bot_link()
     mention = bot_mention()
     if kind == "announce":
-        return (
+        return _x_with_disclaimer(
             "🟠 SaylorWatch — real-time BTC whale alerts\n\n"
             "• Strategy (Saylor) buy/sell alerts\n"
             "• Top corporate BTC holders + ETF flows\n"
             "• Auto Bloomberg-style cards — easy to repost\n\n"
-            f"Free in Telegram → {link}\n\n"
-            "#Bitcoin #BTC #MicroStrategy #Saylor"
+            f"Free in Telegram → {link}",
+            "#Bitcoin #BTC #MicroStrategy #Saylor",
         )
     if kind == "weekly":
-        return (
+        return _x_with_disclaimer(
             "📊 New: Weekly BTC Whale Digest (Premium)\n\n"
             "Every Sunday — snapshot of top holders, "
             "buy/sell activity & ETF flows in one PNG card.\n\n"
             f"Try the bot → {link}\n"
-            f"Premium via {mention}\n\n"
-            "#Bitcoin #BTC #WhaleAlert"
+            f"Premium via {mention}",
+            "#Bitcoin #BTC #WhaleAlert",
         )
     if kind == "whales":
-        return (
+        return _x_with_disclaimer(
             "🐋 Who holds the most BTC right now?\n\n"
             "SaylorWatch tracks Strategy, Tesla, MARA, Metaplanet, "
             "BlackRock IBIT & more — with instant alerts on moves.\n\n"
-            f"→ {link}\n\n"
-            "#Bitcoin #BTC #Treasury"
+            f"→ {link}",
+            "#Bitcoin #BTC #Treasury",
         )
+    if kind == "tiers":
+        from plan_showcase import format_social_tiers_summary
+
+        return format_social_tiers_summary(lang)
     if kind == "reddit_comment":
         return (
             f"For live alerts with auto-generated cards, there's a free Telegram bot: {link} "
             f"({mention}). Tracks Strategy treasury moves, top corporate holders and ETF flows. "
             "Not financial advice — DYOR."
         )
+    if kind == "paper_wallet":
+        from social_schedule import render_x_paper_wallet, upcoming_x_posts
+
+        today = datetime.now(_social_tz()).date()
+        v = variant
+        if not v:
+            slot = next((p for p in upcoming_x_posts(count=12) if p.post_date == today), None)
+            v = slot.variant if slot else "table"
+        return render_x_paper_wallet(variant=v, when=today)
     raise ValueError(f"Unknown post kind: {kind}")
 
 
@@ -155,19 +192,32 @@ def render_reddit_post(kind: str, lang: str = "en") -> tuple[str, str]:
             "*Not financial advice — sharing a tool I maintain.*"
         )
         return title, body
+    if kind == "tiers":
+        from plan_showcase import format_social_tiers_summary
+
+        title = "[OC] Free vs Premium BTC alerts in Telegram — Strategy, whales & ETF cards"
+        body = format_social_tiers_summary(lang).replace(
+            "#Bitcoin #BTC #MicroStrategy #Saylor", ""
+        ).strip()
+        body += "\n\n*Not financial advice.*"
+        return title, body
     if kind == "reddit_comment":
         body = render_x_post("reddit_comment")
         return "", body
     raise ValueError(f"Unknown post kind: {kind}")
 
 
-def format_share_message(platform: str, kind: str) -> str:
+def format_share_message(platform: str, kind: str, *, variant: str | None = None) -> str:
     """Текст для admin /share — готово к копированию."""
     platform = platform.lower().strip()
     kind = kind.lower().strip()
+    if variant:
+        variant = variant.lower().strip()
     if platform in {"x", "twitter"}:
-        return render_x_post(kind)
+        return render_x_post(kind, variant=variant)
     if platform == "reddit":
+        if kind == "paper_wallet":
+            raise ValueError("paper_wallet is X-only; use: /share x paper_wallet")
         title, body = render_reddit_post(kind)
         if title:
             return f"TITLE:\n{title}\n\nBODY:\n{body}"
@@ -177,11 +227,17 @@ def format_share_message(platform: str, kind: str) -> str:
 
 def list_share_options() -> str:
     kinds = ", ".join(POST_KINDS)
+    pw = ", ".join(PAPER_WALLET_VARIANTS)
     return (
         "Platforms: x, reddit\n"
-        f"Kinds: {kinds}\n\n"
+        f"Kinds: {kinds}\n"
+        f"Paper Wallet variants (X): {pw}\n\n"
         "Examples:\n"
         "/share x announce\n"
-        "/share reddit weekly\n"
-        "/share reddit whales"
+        "/share x tiers\n"
+        "/share collage tiers\n"
+        "/share x paper_wallet\n"
+        "/share x paper_wallet whales\n"
+        "/share schedule\n"
+        "/share reddit weekly"
     )

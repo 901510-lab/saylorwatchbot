@@ -539,3 +539,48 @@ Reddit → https://www.reddit.com/r/SaylorWatch/
 ```
 
 + `announcement_card.png`
+
+---
+
+## 10. X @paper_wallet_co — таблицы + алерты
+
+Аккаунт: [@paper_wallet_co](https://x.com/paper_wallet_co) · таблицы CoinGecko в TG: `@Paper_wallet_co`.
+
+### Команды бота
+
+| Команда | Назначение |
+|---------|------------|
+| `/share schedule` | Следующие 6 слотов: дата, тип, картинка |
+| `/share x paper_wallet` | EN-текст с **сегодняшней датой** |
+| `/share x paper_wallet table` | Пост про таблицу CoinGecko |
+| `/share x paper_wallet whales` | Пост про китов / алерты |
+| `/share x paper_wallet intro` | Intro в стиле pin |
+
+Ротация: `table` → `whales` → `intro` каждые `SOCIAL_X_INTERVAL_DAYS` (по умолчанию 4).
+
+### Env на сервере
+
+```bash
+SOCIAL_X_URL=https://x.com/paper_wallet_co
+SOCIAL_X_HANDLE=paper_wallet_co
+SOCIAL_X_INTERVAL_DAYS=4
+SOCIAL_X_SCHEDULE_START=2026-06-21
+SOCIAL_X_TIMEZONE=Europe/Moscow
+SOCIAL_X_REMINDER_ENABLED=true
+```
+
+Бот шлёт DM на `X_CHAT_ID` в день поста и за день до.
+
+### Google Calendar (локальный ПК)
+
+```bash
+bash scripts/setup_social_calendar.sh
+cp scripts/social_calendar.example.env ~/.config/saylorwatch/social_calendar.env
+.venv-social/bin/python scripts/social_calendar_sync.py
+```
+
+События с popup/email за 24 ч и за 2 ч до поста. Cron (раз в неделю):
+
+```bash
+0 9 * * 1 cd ~/SaylorWatchBot && .venv-social/bin/python scripts/social_calendar_sync.py --weeks 12
+```

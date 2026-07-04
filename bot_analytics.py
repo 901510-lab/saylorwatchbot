@@ -123,6 +123,29 @@ def _last_visit_iso(users: dict[str, dict]) -> str | None:
     return latest.isoformat() if latest else None
 
 
+def _admin_user_id() -> int | None:
+    raw = os.environ.get("X_CHAT_ID", "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def _total_starts_excluding_admin(users: dict[str, dict]) -> int:
+    admin_id = _admin_user_id()
+    total = 0
+    for uid, raw in users.items():
+        if admin_id is not None and uid == str(admin_id):
+            continue
+        try:
+            total += int(raw.get("start_count", 0))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def get_analytics() -> BotAnalytics:
     data = _load_stats()
     users = data["users"]
@@ -131,7 +154,8 @@ def get_analytics() -> BotAnalytics:
     paid_count, stars = payment_summary()
     return BotAnalytics(
         unique_users=len(users),
-        total_starts=int(data["meta"].get("total_starts", 0)),
+        # В отчёте /info и /botstats не считаем admin (/X_CHAT_ID) в Total /start.
+        total_starts=_total_starts_excluding_admin(users),
         active_premium=len(active),
         total_premium_ever=len(all_subs),
         paid_subscriptions=paid_count,

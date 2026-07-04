@@ -115,7 +115,7 @@ async def _apply_etf_flow(
                     source=holdings.source,
                     flow_date=flow_date,
                 )
-            app.write_log(f"ℹ️ [{entity.id}] ETF flow already processed for {flow_date}")
+            logger.debug("[%s] ETF flow already processed for %s", entity.id, flow_date)
             return (
                 t(
                     lang,
@@ -193,7 +193,7 @@ async def _apply_etf_flow(
         inflow=inflow,
         lang=lang,
     )
-    delivered = await app.send_alert_with_card(
+    alert_instant, _alert_queued = await app.send_alert_with_card(
         bot,
         text=alert_text,
         delta_btc=flow_btc,
@@ -205,7 +205,7 @@ async def _apply_etf_flow(
         entity_id=entity.id,
         is_etf=True,
     )
-    if delivered <= 0:
+    if alert_instant + _alert_queued <= 0:
         app.write_log(f"⚠️ [{entity.id}] ETF alert not delivered — baseline kept")
         return (
             t(

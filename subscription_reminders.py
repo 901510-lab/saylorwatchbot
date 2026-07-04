@@ -144,6 +144,9 @@ def seconds_until_next_run(*, now: datetime.datetime | None = None) -> float:
 
 
 def _format_reminder_text(lang: str, *, days_left: int, expires_on: str, user_id: int) -> str:
+    from subscription_plans import PLANS, PlanId
+
+    free = PLANS[PlanId.FREE]
     founding_line = ""
     if user_claimed_founding(user_id):
         slot = user_claim_slot(user_id) or 0
@@ -153,6 +156,8 @@ def _format_reminder_text(lang: str, *, days_left: int, expires_on: str, user_id
         "premium_expiry_reminder",
         days=days_left,
         date=expires_on,
+        delay=free.strategy_alert_delay_minutes,
+        free_top=free.whales_top_n,
     )
 
 
@@ -189,55 +194,56 @@ async def run_subscription_expiry_reminders(
     sent_count = 0
     due_found = False
     thresholds = set(REMINDER_DAYS_BEFORE)
-    state = _load_state()
-    sent_map: dict = state.setdefault("sent", {})
 
-    for sub in list_subscribers(active_premium_only=True):
-        if _is_admin_user(sub.user_id):
-            continue
-        if not sub.expires_at:
-            continue
+    with json_rw_lock(STATE_FILE, default=_REMINDER_STATE_DEFAULT) as state:
+        sent_map: dict = state.setdefault("sent", {})
 
-        days_left = _days_until_expiry_local(sub, now=now)
-        if days_left is None or days_left not in thresholds:
-            continue
+        for sub in list_subscribers(active_premium_only=True):
+            if _is_admin_user(sub.user_id):
+                continue
+            if not sub.expires_at:
+                continue
 
-        expires_on = expiry_date_label(sub)
-        if not expires_on:
-            continue
+            days_left = _days_until_expiry_local(sub, now=now)
+            if days_left is None or days_left not in thresholds:
+                continue
 
-        key = f"{sub.user_id}:{expires_on}:{days_left}"
-        if key in sent_map:
-            continue
+            expires_on = expiry_date_label(sub)
+            if not expires_on:
+                continue
 
-        due_found = True
-        lang = _user_lang(sub.user_id)
-        text = _format_reminder_text(
-            lang,
-            days_left=days_left,
-            expires_on=expires_on,
-            user_id=sub.user_id,
-        )
-        try:
-            await bot.send_message(
-                chat_id=sub.user_id,
-                text=text,
-                parse_mode="Markdown",
+            key = f"{sub.user_id}:{expires_on}:{days_left}"
+            if key in sent_map:
+                continue
+
+            due_found = True
+            lang = _user_lang(sub.user_id)
+            text = _format_reminder_text(
+                lang,
+                days_left=days_left,
+                expires_on=expires_on,
+                user_id=sub.user_id,
             )
-            sent_map[key] = datetime.datetime.now(datetime.UTC).isoformat()
-            sent_count += 1
-        except Exception as exc:
-            logger.warning(
-                "Premium expiry reminder failed user=%s days_left=%s: %s",
-                sub.user_id,
-                days_left,
-                exc,
-            )
+            try:
+                await bot.send_message(
+                    chat_id=sub.user_id,
+                    text=text,
+                    parse_mode="Markdown",
+                )
+                sent_map[key] = datetime.datetime.now(datetime.UTC).isoformat()
+                sent_count += 1
+            except Exception as exc:
+                logger.warning(
+                    "Premium expiry reminder failed user=%s days_left=%s: %s",
+                    sub.user_id,
+                    days_left,
+                    exc,
+                )
 
-    if sent_count > 0 or not due_found:
-        state["last_run_date"] = run_date_key(now)
-        _save_state(state)
-    else:
+        if sent_count > 0 or not due_found:
+            state["last_run_date"] = run_date_key(now)
+
+    if due_found and sent_count == 0:
         logger.warning(
             "Premium expiry reminders: %s due but all sends failed — will retry",
             run_date_key(now),

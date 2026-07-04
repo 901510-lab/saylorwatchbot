@@ -80,6 +80,8 @@ def test_i18n_templates() -> None:
                     price=7,
                     stars=350,
                     premium_top=10,
+                    delay=15,
+                    free_top=7,
                     period="Jun 10–16",
                 )
                 ok(f"i18n {lang}/{key}")
@@ -201,12 +203,30 @@ def test_social_growth() -> None:
     for kind in POST_KINDS:
         if kind == "reddit_comment":
             text = format_share_message("reddit", kind)
+        elif kind == "paper_wallet":
+            text = format_share_message("x", kind)
+            if "Not financial advice" not in text and "NFA" not in text:
+                fail("social template paper_wallet", "missing disclaimer")
+                continue
         else:
             text = format_share_message("x", kind) if kind != "announce" else render_x_post(kind)
         if not text.strip():
             fail(f"social template {kind}", "empty")
+        elif kind != "reddit_comment" and "Not financial advice" not in text and "NFA" not in text:
+            fail(f"social template {kind}", "missing X disclaimer")
         else:
             ok(f"social template {kind}")
+
+    try:
+        from social_schedule import upcoming_x_posts
+
+        posts = upcoming_x_posts(count=3)
+        if len(posts) < 3:
+            fail("social schedule", f"expected 3 posts, got {len(posts)}")
+        else:
+            ok("social schedule upcoming")
+    except ImportError:
+        print("  SKIP social_schedule (not deployed)")
 
 
 def test_main_version() -> None:
@@ -222,6 +242,27 @@ def test_main_version() -> None:
         ok(f"BOT_VERSION={ver}")
 
 
+def test_command_catalog_sync() -> None:
+    """Команды в main.BOT_COMMANDS должны быть в bot_knowledge.VALID_BOT_COMMANDS."""
+    try:
+        import main
+        from bot_knowledge import COMMAND_SPECS, VALID_BOT_COMMANDS
+    except ImportError as exc:
+        print(f"  SKIP command catalog ({exc.name})")
+        return
+    menu_cmds = {c.command for c in main.BOT_COMMANDS}
+    missing = sorted(menu_cmds - VALID_BOT_COMMANDS)
+    if missing:
+        fail("BOT_COMMANDS vs knowledge", f"missing in VALID_BOT_COMMANDS: {missing}")
+    else:
+        ok("BOT_COMMANDS ⊆ VALID_BOT_COMMANDS")
+    for cmd in ("partners", "donate", "disclaimer"):
+        if cmd not in COMMAND_SPECS:
+            fail("COMMAND_SPECS", f"missing /{cmd}")
+        else:
+            ok(f"COMMAND_SPECS /{cmd}")
+
+
 def main() -> int:
     print("SaylorWatchBot sanity check\n")
     with tempfile.TemporaryDirectory() as td:
@@ -235,6 +276,7 @@ def main() -> int:
         test_alert_gating()
         test_social_growth()
         test_main_version()
+        test_command_catalog_sync()
 
     print()
     if FAILURES:

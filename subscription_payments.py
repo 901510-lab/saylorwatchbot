@@ -140,7 +140,7 @@ def validate_pre_checkout(
     user_id, days = parsed
     if user_id != buyer_user_id:
         return False, "user_mismatch"
-    if days != PREMIUM_BILLING_DAYS:
+    if days < 1 or days > 400:
         return False, "invalid_days"
     return True, None
 
@@ -225,19 +225,29 @@ def fulfill_premium_payment(payment, buyer_user_id: int):
         logger.error("successful_payment failed validation: %s", reason)
         return None
 
-    with file_lock(PAYMENTS_FILE):
-        if payment_already_processed(charge_id):
+    with json_rw_lock(PAYMENTS_FILE, default=_PAYMENTS_DEFAULT) as blob:
+        payments = _normalize_payments(blob)
+        if charge_id in payments:
             logger.info("duplicate payment ignored: %s", charge_id)
             return get_subscriber(buyer_user_id)
-        record_payment(
-            charge_id,
-            user_id=user_id,
-            days=days,
-            stars=payment.total_amount,
-            payload=payment.invoice_payload,
-            _skip_lock=True,
-        )
-        sub = grant_premium_days(user_id, days)
+        try:
+            sub = grant_premium_days(user_id, days)
+        except Exception:
+            logger.exception(
+                "grant_premium_days failed user=%s charge=%s — payment not recorded",
+                user_id,
+                charge_id,
+            )
+            return None
+        payments[charge_id] = {
+            "user_id": user_id,
+            "days": days,
+            "stars": payment.total_amount,
+            "payload": payment.invoice_payload,
+            "processed_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        }
+        blob.clear()
+        blob.update({"payments": payments})
     logger.info(
         "premium granted user=%s days=%s stars=%s charge=%s",
         user_id,
