@@ -107,7 +107,6 @@ from bot_knowledge import (
     is_weekly_report_question,
     is_personal_offtopic_email,
     detect_offtopic_topic,
-    PLAYBOOK_MINIMAL_REPLY,
     multi_faq_playbook_reply,
     topic_from_faq_hints,
 )
@@ -265,7 +264,7 @@ RULES:
 - Max ~120 words.
 - Personal letters to the channel admin, CV/LinkedIn/portfolio pitches, dating, or obvious spam:
   politely decline — no admin personal details, no social links.
-  Obvious spam: 1–2 sentences, no /help, no disclaimer.
+  Obvious spam: 1–2 sentences, no /help (legal disclaimer is appended automatically).
   Other personal mail: bot support only → @Saylor_w_bot /help if bot question."""
 
 BAD_REPLY_EXAMPLE = """BAD (never write like this):
@@ -578,11 +577,17 @@ def email_disclaimer_for_text(text: str) -> str:
     return EMAIL_DISCLAIMER.get(lang) or EMAIL_DISCLAIMER["en"]
 
 
-def reply_signature(body: str) -> str:
+def ensure_email_disclaimer(body: str) -> str:
+    """Юридический дисклеймер в каждом исходящем письме клиенту (без дубля)."""
     body = body.rstrip()
     low = body.lower()
-    if not any(m in low for m in _DISCLAIMER_MARKERS):
-        body = f"{body}\n\n{email_disclaimer_for_text(body)}"
+    if any(m in low for m in _DISCLAIMER_MARKERS):
+        return body
+    return f"{body}\n\n{email_disclaimer_for_text(body)}"
+
+
+def reply_signature(body: str) -> str:
+    body = ensure_email_disclaimer(body)
     lang = _reply_lang("", body)
     if should_append_email_help_wiki(body):
         body = f"{body}\n\n{help_wiki_email_appendix(lang)}"
@@ -1207,8 +1212,6 @@ def faq_playbook_reply(*, subject: str, body: str) -> str | None:
     if topic not in PLAYBOOK_NO_PS and topic != "help" and not topic.startswith("command:"):
         footer = MODEST_FOOTER.get(lang) or MODEST_FOOTER["en"]
         text = f"{text}\n\n{footer}"
-    if topic in PLAYBOOK_MINIMAL_REPLY:
-        return text.rstrip() + SIGNATURE
     return reply_signature(text)
 
 
@@ -1446,8 +1449,6 @@ def generate_reply_outcome(
         lang = _reply_lang(subject, effective_customer_text(subject=subject, raw_body=raw) or raw)
         text = playbook_text_for_topic(off, lang)
         if text:
-            if off in PLAYBOOK_MINIMAL_REPLY:
-                return ReplyOutcome(text.rstrip() + SIGNATURE, True, "playbook-offtopic")
             return ReplyOutcome(reply_signature(text), True, "playbook-offtopic")
 
     core = effective_customer_text(subject=subject, raw_body=raw)
@@ -2197,6 +2198,9 @@ def send_reply(reply_to: str, subject: str, body: str, *, in_reply_to: str = "")
     user = cfg("MAIL_USER")
     if not user:
         raise RuntimeError("Задайте MAIL_USER в scripts/email_support.env")
+    body = ensure_email_disclaimer(body)
+    if not body.rstrip().endswith("SaylorWatch@outlook.com"):
+        body = body.rstrip() + SIGNATURE
     errors: list[str] = []
     for method in send_methods():
         try:
